@@ -26,6 +26,7 @@ function handleEslEvent(application) {
                 };
 
                 var jsonEvent = e.serialize('json', 1);
+                application.Hooks.emit(e.type, jsonEvent['variable_domain_name'], jsonEvent);
                 if (jsonEvent['Channel-Presence-ID']) {
                     var user = application.Users.get(jsonEvent['Channel-Presence-ID']);
                     jsonEvent['webitel-event-name'] = 'call';

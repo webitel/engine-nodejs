@@ -190,6 +190,14 @@ function Handler(wss, application) {
                 log.debug(res.getHeader('Modesl-Reply-OK'));
             });
 
+            application.Broker.unbind(
+                user,
+                application.Broker.Exchange.FS_EVENT,
+                (msg) => {
+                    console.log(msg);
+                }
+            );
+
             var _id = user.id.split('@'),
                 _domain = _id[1] || _id[0],
                 domain = application.Domains.get(_domain),
@@ -233,6 +241,18 @@ function Handler(wss, application) {
             application.Esl.filter('Channel-Presence-ID', user.id, function (res) {
                 log.debug(res.getHeader('Modesl-Reply-OK'));
             });
+
+            // TODO
+            application.Broker.bind(
+                user,
+                //`*.*.CHANNEL_CREATE.*.*.${user.id}`,
+                `*.*.*.*.*.${encodeURIComponent(user.id).replace(/\./g, '%2E')}`,
+                application.Broker.Exchange.FS_EVENT,
+                (msg) => {
+                    log.trace(`On event ${msg.fields.consumerTag}`);
+                }
+            );
+
 
             if (this._maxSession < this.length())
                 this._maxSession = this.length();

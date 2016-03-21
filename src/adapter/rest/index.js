@@ -15,6 +15,12 @@ require('./cdr/cdr.resource').addRoutes(api);
 
 api.use(bodyParser.json());
 
+api.post('/test', (req, res) => {
+
+    return res.status(200).json({
+        "ok": 1
+    })
+})
 
 if (conf.get('conference:enable').toString() == 'true') {
     api.use('/', express.static(path.join(__appRoot, '/public/conference')));

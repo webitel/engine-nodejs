@@ -29,7 +29,8 @@ function initConnect (server) {
             userStatus: require('./query/userStatus').addQuery(db),
             location: require('./query/location').addQuery(db),
             conference: require('./query/conference').addQuery(db),
-            acl: require('./query/acl').addQuery(db)
+            acl: require('./query/acl').addQuery(db),
+            hook: require('./query/hook').addQuery(db)
         };
 
         server.emit('sys::connectDb', db);

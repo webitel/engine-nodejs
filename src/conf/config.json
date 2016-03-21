@@ -12,7 +12,7 @@
         }
     },
     "mongodb": {
-        "uri": "mongodb://MONGODB_HOST:27017/webitel",
+        "uri": "mongodb://pre.webitel.com:27017/webitel",
         "collectionPublic": "public",
         "collectionDefault": "default",
         "collectionSystem": "global",
@@ -29,23 +29,24 @@
         "collectionAgentStatus": "agentStatusEngine",
         "collectionConference": "conference",
         "collectionLocation": "location",
-        "collectionAclPermissions": "aclPermissions"
+        "collectionAclPermissions": "aclPermissions",
+        "collectionHook": "hook"
     },
     "webitelServer": {
-        "host": "CONSOLE_HOST",
+        "host": "pre.webitel.com",
         "port": "6873",
         "account": "root",
-        "secret": "ROOT_PASSWORD",
+        "secret": "secret",
         "reconnect": 5
     },
     "freeSWITCH": {
-        "host": "172.17.0.1",
+        "host": "pre.webitel.com",
         "port": 8021,
         "pwd": "ClueCon",
         "reconnect": 5
     },
     "cdrServer": {
-        "host": "https://pre.webitel.com:10023",
+        "host": "https://pre.webitel.com/engine",
         "useProxy": false
     },
     "application": {
@@ -98,5 +99,13 @@
         "validateUri": "https://webitel.com:10022/",
         "aliveUserHour": 24,
         "scheduleHour": 5
+    },
+    "amqp": {
+        "uri": "amqp://localhost",
+        "exchange": {
+            "type": "topic",
+            "name": "Engine"
+
+        }
     }
 }

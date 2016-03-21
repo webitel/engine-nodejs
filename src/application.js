@@ -13,7 +13,9 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     Collection = require('./lib/collection'),
     httpSrv = (conf.get('ssl:enabled').toString() == 'true') ? require('https') : require('http'),
     initDb = require('./db'),
-    plainTableToJSONArray = require('./utils/parse').plainTableToJSONArray
+    plainTableToJSONArray = require('./utils/parse').plainTableToJSONArray,
+    Broker = require('./lib/broker'),
+    Hooks = require('./services/hook/hookClass');
     //outQueryService = require('./services/outboundQueue')
     ;
 
@@ -28,6 +30,8 @@ class Application extends EventEmitter2 {
         this.Agents = new Collection('id');
         this.OutboundQuery = new Collection('id');
         this.loggedOutAgent = new Collection('id');
+        this.Hooks = new Hooks(this);
+        this.Broker = new Broker();
         process.nextTick(this.connectDb.bind(this));
     }
 
