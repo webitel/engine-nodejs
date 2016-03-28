@@ -5,28 +5,25 @@
 
 'use strict';
 
+var log = require(__appRoot + '/lib/log')(module),
+    util = require('util'),
+    WebitelAmqp = require('./amqp')
+    ;
+
 
 class Broker {
-    constructor(type, app) {
+    constructor(conf, app) {
+        if (!conf)
+            throw "Bad config broker";
 
+        let configBroker;
+        if (conf.hasOwnProperty('amqp'))
+            configBroker = conf.amqp;
+        return new WebitelAmqp(configBroker);
+        //return Object.create({
+        //    bind:1
+        //});
     };
-
-    function initAmqp () {
-
-    };
-
-    function initEsl (eslConnection) {
-
-    };
-
-
-
-    get Types () {
-        return {
-            "amqp": initAmqp,
-            "esl": initEsl
-        }
-    }
 
 };
 

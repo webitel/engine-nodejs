@@ -100,12 +100,13 @@
         "aliveUserHour": 24,
         "scheduleHour": 5
     },
-    "amqp": {
-        "uri": "amqp://localhost",
-        "exchange": {
-            "type": "topic",
-            "name": "Engine"
-
+    "broker": {
+        "amqp": {
+            "uri": "amqp://localhost",
+            "exchange": {
+                "type": "topic",
+                "name": "Engine"
+            }
         }
     }
 }

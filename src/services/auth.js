@@ -189,7 +189,7 @@ function getTokenMaxExpires (caller, diff, cb) {
 
         try {
             var _id = generateUuid.v4();
-            var tokenObj = genToken(caller['id']),
+            var tokenObj = genToken(caller['id'], caller.acl),
                 userObj = {
                     "key": _id,
                     "domain": caller['domain'],
