@@ -7,26 +7,9 @@ var log = require(__appRoot + '/lib/log')(module),
 module.exports = handleEslEvent;
 
 function handleEslEvent(application) {
-        var activeUsers = application.Users.getKeys();
-        activeUsers.forEach(function (userName) {
-            //TODO bug
-            application.Esl.filter('Channel-Presence-ID', userName, function (res) {
-                log.debug(res.getHeader('Modesl-Reply-OK'));
-            });
-        });
 
-        return application.Esl.on('esl::event::**', function (e) {
+        application.Broker.on('callEvent', (jsonEvent) => {
             try {
-                //console.info(`event: ${e.type}`);
-                if (!e.type) {
-                    return 0;
-                } else if (e.subclass == 'callcenter::info') {
-                    //log.trace(e.serialize('json', 1))
-                    return ccEvents(e.serialize('json', 1))
-                };
-
-                var jsonEvent = e.serialize('json', 1);
-                application.Hooks.emit(e.type, jsonEvent['variable_domain_name'], jsonEvent);
                 if (jsonEvent['Channel-Presence-ID']) {
                     var user = application.Users.get(jsonEvent['Channel-Presence-ID']);
                     jsonEvent['webitel-event-name'] = 'call';
@@ -69,13 +52,23 @@ function handleEslEvent(application) {
                             "variable_webitel_data": "'" + jsonEvent['variable_webitel_data'] + "'"
                         };
                         user.sendObject(jsonRequest);
-                    };
+                    }
+                    ;
+
                     log.debug(jsonEvent['Event-Name'] + ' -> ' + (jsonEvent["Unique-ID"] || "Other ESL event.") + ' -> '
                         + jsonEvent['Channel-Presence-ID']);
-                };
-
+                }
+                ;
             } catch (e) {
                 log.error(e.message);
-            };
+            }
+        });
+
+        application.Broker.on('ccEvent', (jsonEvent) => {
+            try {
+                return ccEvents(jsonEvent)
+            } catch (e) {
+                log.error(e.message);
+            }
         });
 };

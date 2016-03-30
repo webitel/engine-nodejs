@@ -102,7 +102,7 @@
     },
     "broker": {
         "amqp": {
-            "uri": "amqp://localhost",
+            "uri": "amqp://localhost?heartbeat=0",
             "exchange": {
                 "type": "topic",
                 "name": "Engine"

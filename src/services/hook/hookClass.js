@@ -88,60 +88,8 @@ class Trigger {
         app.on('sys::eslConnect', ()=> {
             scope.Db = app.DB._query.hook;
             scope._init();
-            scope.amqpConnect();
         });
     };
-
-    amqpConnect () {
-        let scope = this;
-        require('amqplib/callback_api')
-            .connect('amqp://localhost', (err, connection) => {
-                // TODO STOP SERVER ???
-                if (err)
-                    return log.error(err);
-
-                connection.createChannel((err, channel) => {
-                    if (err)
-                        return log.error(err);
-
-                    scope.channel = channel;
-                    //scope.testAmqp();
-                });
-            });
-    };
-
-    testAmqp () {
-        let ch = this.channel;
-        var ex = 'TAP.Events';
-        ch.assertQueue('', {exclusive: true}, function (err, qok) {
-            if (err)
-                return log.error(err);
-            ch.prefetch(10);
-            //ch.bindQueue(qok.queue, ex, '#');
-            ch.bindQueue(qok.queue, ex, '*.*.CHANNEL_CREATE.#');
-            ch.bindQueue(qok.queue, ex, '*.*.CHANNEL_DESTROY.#');
-            ch.consume(qok.queue, function(msg) {
-                console.log(`${process.pid} : ${msg.fields.routingKey}`);
-                ch.ack(msg);
-            }, {noAck: false});
-
-        });
-
-        // TODO create Exchange
-        //ch.assertExchange(ex, 'topic', {durable: true}, function (err, res) {
-        //    if (err)
-        //        return log.error(err);
-        //
-        //
-        //});
-
-
-    };
-
-    sendAmqp (msgStr) {
-       //this.channel.sendToQueue('test', new Buffer(msgStr));
-    };
-
 
     _init () {
         let scope = this;
@@ -206,7 +154,6 @@ class Trigger {
 
         let message = new Message(name, e),
             strMeg = message.toString();
-        return this.sendAmqp(strMeg);
 
         log.debug(`Send message: ${message.id}`);
         switch (hook.action.type) {

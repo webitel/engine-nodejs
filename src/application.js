@@ -30,8 +30,8 @@ class Application extends EventEmitter2 {
         this.Agents = new Collection('id');
         this.OutboundQuery = new Collection('id');
         this.loggedOutAgent = new Collection('id');
-        this.Hooks = new Hooks(this);
         this.Broker = new Broker(conf.get('broker'), this);
+        this.Hooks = new Hooks(this);
         process.nextTick(this.connectDb.bind(this));
     }
 
@@ -142,13 +142,6 @@ class Application extends EventEmitter2 {
         esl.on('esl::event::auth::success', function () {
             esl.connected = true;
             console.log('>>> esl::event::auth::success');
-            var ev = conf.get('application:freeSWITCHEvents');
-            esl.subscribe(ev);
-            //for (var key in ev) {
-            //    esl.filter('Event-Name', ev[key]);
-            //};
-            esl.filter('Event-Subclass', 'callcenter::info');
-            require('./adapter/ws/handleEslEvent')(scope);
             scope.emit('sys::connectEsl');
         });
 

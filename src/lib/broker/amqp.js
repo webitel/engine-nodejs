@@ -4,12 +4,17 @@
 'use strict';
 
 var log = require(__appRoot + '/lib/log')(module),
-    Amqp = require('amqplib');
+    EventEmitter2 = require('eventemitter2').EventEmitter2,
+    Amqp = require('amqplib/callback_api');
 
-class WebitelAmqp {
+var HOOK_QUEUE = 'hooks';
 
-    constructor (amqpConf) {
+class WebitelAmqp extends EventEmitter2 {
+
+    constructor (amqpConf, app) {
+        super();
         this.config = amqpConf;
+        this.app = app;
         this.connect();
         this._middlewares = {};
         this.queue = null;
@@ -18,95 +23,151 @@ class WebitelAmqp {
 
     get Exchange () {
         return {
-            // TODO move conf
             FS_EVENT: "TAP.Events"
-            //FS_EVENT: "test"
         };
     };
 
     connect () {
-        let scope = this;
-        scope.channel = null;
+        let scope = this,
+            timerId;
+
         function start () {
-            Amqp.connect(scope.config.uri)
-                .then(
-                (conn) => {
+            if (timerId)
+                timerId = clearTimeout(timerId);
+
+            let closeChannel = function() {
+                scope.queue = null;
+
+                if (scope.channel) {
+                    //scope.channel.close();
+                    scope.channel = null;
+                }
+            };
+            try {
+
+                Amqp.connect(scope.config.uri, (err, conn) => {
+                    if (err) {
+                        log.error(err);
+                        closeChannel();
+                        timerId = setTimeout(start, 5000);
+                        return;
+                    };
+
                     log.info('[AMQP] connect: OK');
                     conn.on('error', (err)=> {
                         if (err.message !== "Connection closing") {
-                            log.error("conn error", err.message);
-                        }
+                            log.error("conn error", err);
+                        };
+                        conn.close();
                     });
                     conn.on('close', (err)=> {
                         log.error(err);
-                        setTimeout(start, 5000);
+                        closeChannel();
+                        timerId = setTimeout(start, 5000);
                     });
-                    conn.createChannel().then((channel) => {
-                        scope.channel = channel;
-                        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true})
-                            .then(
-                            (qok) => {
-                                scope.queue = qok.queue;
-                                channel.consume(scope.queue, (msg) => {
-                                    console.log(`${process.pid} - ${JSON.parse(msg.content.toString())['Event-Name']}`);
 
-                                }, {noAck: true})
-                            }
-                        )
+                    conn.createChannel((err, channel) => {
+                        if (err) {
+                            log.error(err);
+                            closeChannel();
+                            timerId = setTimeout(start, 5000);
+                            return;
+                        };
+                        channel.on('error', (e) => {
+                            log.error(e);
+                        });
+                        scope.channel = channel;
                         scope.init();
                     });
-                },
-                (err) => {
-                    log.error(err);
-                    setTimeout(start, 5000);
                 });
+
+            } catch (e) {
+                log.error(e);
+            }
         };
         start();
     };
 
-    bind (caller, rk, exchange, middleware) {
+    bindChannelEvents (caller, cb) {
         let ch = this.channel;
-        let queue = `engine.${caller.id}`;
-        if (rk instanceof Array)
-            rk.forEach((_rk) => ch.bindQueue(this.queue, exchange, _rk));
-        else ch.bindQueue(this.queue, exchange, rk)
-            .then(
-            () => {
-                //console.log("ok")
-            },
-            (e) => {
-                console.error(e.message)
-            }
-        );
+        if (!ch || !this.queue) return cb(new Error('No connect.'));
+        try {
+            ch.bindQueue(this.queue, this.Exchange.FS_EVENT, getPresenceRoutingFromCaller(caller), {}, cb);
+        } catch (e) {
+            log.error(e);
+        }
 
-        this._middlewares[caller.id] = {
-            middleware: middleware,
-            rk: rk,
-            exchange: exchange
-        };
     };
-    unbind (caller) {
-        let bind = this._middlewares[caller.id],
-            rk = bind && bind.rk;
-        if (rk)
-            if (rk instanceof Array) {
-                rk.forEach((_rk) => this.channel.unbindQueue(this.queue, bind.exchange, _rk));
-            } else {
-                this.channel.unbindQueue(this.queue, bind.exchange, rk)
-            }
-        else log.error("Bad routing key")
-        ;
-        delete this._middlewares[caller.id];
+
+    unBindChannelEvents (caller) {
+        try {
+            if (this.channel && this.queue)
+                this.channel.unbindQueue(this.queue, this.Exchange.FS_EVENT, getPresenceRoutingFromCaller(caller))
+        } catch (e) {
+            log.error(e);
+        }
     };
 
     init () {
-        this.channel.assertExchange(this.config.exchange.name, this.config.exchange.type)
-            .then((ex) => {
-                console.log()
-            })
-    }
+        let scope = this,
+            channel = this.channel;
 
+        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+            scope.queue = qok.queue;
 
+            channel.consume(scope.queue, (msg) => {
+                try {
+                    let json = JSON.parse(msg.content.toString());
+                    // TODO https://freeswitch.org/jira/browse/FS-8817
+                    if (json['Event-Name'] == 'CUSTOM') return;
+                    scope.emit('callEvent', json);
+                } catch (e) {
+                    log.error(e);
+                }
+            }, {noAck: true});
+
+            let activeUsers = scope.app.Users.getKeys();
+            activeUsers.forEach((userName) => {
+                scope.bindChannelEvents({id: userName});
+            });
+        });
+
+        // CC
+        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+
+            channel.bindQueue(qok.queue, scope.Exchange.FS_EVENT, "*.*.callcenter%3A%3Ainfo.*.*");
+
+            channel.consume(qok.queue, (msg) => {
+                try {
+                    scope.emit('ccEvent', JSON.parse(msg.content.toString()));
+                } catch (e) {
+                    log.error(e);
+                }
+            }, {noAck: true});
+        });
+
+        //hooks
+        //channel.assertQueue(HOOK_QUEUE, {autoDelete: false, durable: false, exclusive: false}, (err, qok) => {
+        //
+        //    channel.consume(qok.queue, (msg) => {
+        //        try {
+        //
+        //        } catch (e) {
+        //            log.error(e);
+        //        }
+        //    }, {noAck: true});
+        //});
+
+    };
 };
+
+function getPresenceRoutingFromCaller (caller) {
+    try {
+        return `*.*.*.${encodeURIComponent(caller.id).replace(/\./g, '%2E')}.*`;
+    } catch (e) {
+        log.error(e);
+        return null;
+    }
+}
 
 module.exports = WebitelAmqp;

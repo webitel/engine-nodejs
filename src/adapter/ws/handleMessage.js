@@ -186,15 +186,11 @@ function Handler(wss, application) {
     
     application.Users.on('removed', function (user) {
         try {
-            application.Esl.filterDelete('Channel-Presence-ID', user.id, function (res) {
-                log.debug(res.getHeader('Modesl-Reply-OK'));
-            });
-
-            application.Broker.unbind(
+            application.Broker.unBindChannelEvents(
                 user,
-                application.Broker.Exchange.FS_EVENT,
-                (msg) => {
-                    console.log(msg);
+                (e) => {
+                    if (e)
+                        log.error(e);
                 }
             );
 
@@ -238,18 +234,12 @@ function Handler(wss, application) {
     application.Users._maxSession = 0;
     application.Users.on('added', function (user) {
         try {
-            application.Esl.filter('Channel-Presence-ID', user.id, function (res) {
-                log.debug(res.getHeader('Modesl-Reply-OK'));
-            });
 
-            // TODO
-            application.Broker.bind(
+            application.Broker.bindChannelEvents(
                 user,
-                //`*.*.CHANNEL_CREATE.*.*.${user.id}`,
-                `*.*.*.*.*.${encodeURIComponent(user.id).replace(/\./g, '%2E')}`,
-                application.Broker.Exchange.FS_EVENT,
-                (msg) => {
-                    log.trace(`On event ${msg.fields.consumerTag}`);
+                (e) => {
+                    if (e)
+                        log.error(e);
                 }
             );
 

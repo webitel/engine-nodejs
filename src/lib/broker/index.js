@@ -7,7 +7,8 @@
 
 var log = require(__appRoot + '/lib/log')(module),
     util = require('util'),
-    WebitelAmqp = require('./amqp')
+    WebitelAmqp = require('./amqp'),
+    WebitelEsl = require('./esl')
     ;
 
 
@@ -17,12 +18,12 @@ class Broker {
             throw "Bad config broker";
 
         let configBroker;
-        if (conf.hasOwnProperty('amqp'))
+        if (conf.hasOwnProperty('amqp')) {
             configBroker = conf.amqp;
-        return new WebitelAmqp(configBroker);
-        //return Object.create({
-        //    bind:1
-        //});
+            return new WebitelAmqp(configBroker, app);
+        } else {
+            return new WebitelEsl(app)
+        }
     };
 
 };
