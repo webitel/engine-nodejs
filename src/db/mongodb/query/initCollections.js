@@ -116,6 +116,17 @@ var Indexes = {
         "sysLength": 1,
         "code": 1
     }],
+    "collectionHook": [
+        {
+            "_id": 1,
+            "domain": 1
+        },
+        {
+            "enable": 1,
+            "domain": 1,
+            "event": 1
+        }
+    ],
     "collectionAclPermissions": [{
         "_unique": true,
         "_": {

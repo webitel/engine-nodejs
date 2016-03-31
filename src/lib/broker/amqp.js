@@ -108,6 +108,33 @@ class WebitelAmqp extends EventEmitter2 {
         }
     };
 
+    bindHook (event, cb) {
+        try {
+            if (!event)
+                return cb && cb(new Error("Bad event name"));
+            let _e = event.split('->').map((value)=>encodeRK(value) );
+
+            let rk = `*.${_e[0]}.${_e[1] || '*' }.*.*`;
+            if (this.channel)
+                this.channel.bindQueue(HOOK_QUEUE, this.Exchange.FS_EVENT, rk, {}, cb);
+        } catch (e) {
+            log.error(e);
+        }
+    };
+
+    unBindHook (event, cb) {
+        try {
+            if (!event)
+                return cb && cb(new Error("Bad event name"));
+            let _e = event.split('->').map((value)=>encodeRK(value) );
+            let rk = `*.${_e[0]}.${_e[1] || '*' }.*.*`;
+            if (this.channel)
+                this.channel.unbindQueue(HOOK_QUEUE, this.Exchange.FS_EVENT, rk, {}, cb);
+        } catch (e) {
+            log.error(e);
+        }
+    };
+
     init () {
         let scope = this,
             channel = this.channel;
@@ -147,11 +174,30 @@ class WebitelAmqp extends EventEmitter2 {
         });
 
         //hooks
-        //channel.assertQueue(HOOK_QUEUE, {autoDelete: false, durable: false, exclusive: false}, (err, qok) => {
+        channel.assertQueue(HOOK_QUEUE, {autoDelete: false, durable: false, exclusive: false}, (err, qok) => {
+
+            channel.consume(qok.queue, (msg) => {
+                try {
+                    let e = JSON.parse(msg.content.toString()),
+                        domain = getDomain(e);
+
+                    if (!domain) return;
+
+                    scope.emit('hookEvent', e['Event-Name'], domain, e);
+                } catch (e) {
+                    log.error(e);
+                }
+            }, {noAck: true});
+        });
+
+        //TODO webitel events
+        //channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+        //
+        //    channel.bindQueue(qok.queue, scope.Exchange.FS_EVENT, "*.*.webitel%3A%3Aaccount_status.*.*");
         //
         //    channel.consume(qok.queue, (msg) => {
         //        try {
-        //
+        //            console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
         //        } catch (e) {
         //            log.error(e);
         //        }
@@ -161,13 +207,40 @@ class WebitelAmqp extends EventEmitter2 {
     };
 };
 
+function encodeRK (rk) {
+    try {
+        if (rk)
+            return encodeURIComponent(rk)
+                .replace(/\./g, '%2E')
+                .replace(/\:/g, '%3A')
+    } catch(e) {
+        log.error(e);
+        return null;
+    }
+}
+
 function getPresenceRoutingFromCaller (caller) {
     try {
-        return `*.*.*.${encodeURIComponent(caller.id).replace(/\./g, '%2E')}.*`;
+        let callerId = encodeRK(caller.id);
+        return `*.*..${callerId}.*`;
     } catch (e) {
         log.error(e);
         return null;
     }
+};
+
+function getDomain (data) {
+    if (!data)
+        return null;
+
+    if (data.variable_domain_name)
+        return data.variable_domain_name;
+
+    if (data.variable_w_domain)
+        return data.variable_w_domain;
+
+    if (data['Channel-Presence-ID'])
+        return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1)
 }
 
 module.exports = WebitelAmqp;

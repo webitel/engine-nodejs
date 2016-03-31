@@ -62,7 +62,10 @@ class WebitelEsl extends EventEmitter2 {
         esl.filterDelete('Channel-Presence-ID', caller.id, function (res) {
             log.debug(res.getHeader('Modesl-Reply-OK'));
         });
-    }
+    };
+
+    // TODO
+    bindHook () {};
 
 };
 

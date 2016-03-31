@@ -30,6 +30,7 @@ const RESOURCES = [
     'cc/queue',
 
     'book',
+    'hook',
 
     'cdr',
     'cdr/files',
@@ -72,6 +73,7 @@ module.exports = [
             'cc/queue': ["*"],
 
             'book': ["*"],
+            'hook': ["*"],
 
             'cdr': ["*"],
             'cdr/files': ["*"],
@@ -122,6 +124,7 @@ module.exports = [
             'cc/queue': ["*"],
 
             'book': ["*"],
+            'hook': ["*"],
 
             'cdr': ["*"],
             'cdr/files': ["*"],

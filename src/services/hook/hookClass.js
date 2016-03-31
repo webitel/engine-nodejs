@@ -6,13 +6,18 @@ var Collection = require(__appRoot + '/lib/collection'),
     generateUuid = require('node-uuid'),
     url = require('url'),
     http = require('http'),
+    request = require('request'),
+    _ = require('underscore'),
     log = require(__appRoot + '/lib/log')(module);
 
 class Hook {
-    constructor(event, domain, action, filter) {
-        this.event = event;
-        this.domain = domain;
-        this.action = action;
+    constructor(option) {
+        let filter = option.filter;
+        this.event = option.event;
+        this.domain = option.domain;
+        this.action = option.action;
+        this.fields = option.fields;
+        this.map = option.map;
         this._filters = {};
         this._fields = [];
         for (let key in filter) {
@@ -63,18 +68,44 @@ const Operations = {
 };
 
 class Message {
-    constructor(eventName, message) {
+    constructor(eventName, message, fields, map) {
         this.action = eventName;
-        this.data = message;
+        this.data = fields ? _.pick(message, fields) : message;
+        if (map instanceof Object) {
+            for (let key in map)
+                if (this.data.hasOwnProperty(key)) {
+                    this.data[map[key]] = this.data[key];
+                    delete this.data[key];
+                }
+        };
         this.id = generateUuid.v4();
-    }
+    };
 
-    toString() {
-        return JSON.stringify({
+    toRequest (uri, method) {
+        let _method = method && method.toUpperCase();
+        let request = {
+            method: _method,
+            uri: uri
+        };
+        if ( _method == 'GET') {
+            request.qs = this.data;
+        } else {
+            request.json = this.toJson();
+        };
+
+        return request;
+    };
+
+    toJson () {
+        return {
             "id": this.id,
             "action": this.action,
             "data": this.data
-        });
+        }
+    }
+
+    toString() {
+        return JSON.stringify(this.toJson());
     }
 };
 
@@ -82,12 +113,31 @@ class Trigger {
     constructor (app) {
         this.hooks = new Collection('id');
         this._app = app;
-        this._fsEvents = [];
+        this._events = [];
 
         var scope = this;
-        app.on('sys::eslConnect', ()=> {
+        //TODO ERROR;
+        app.once('sys::eslConnect', ()=> {
             scope.Db = app.DB._query.hook;
-            scope._init();
+            app.Broker.on('hookEvent', scope.emit.bind(scope));
+            scope._init()
+        });
+
+    };
+
+    find (eventName, domainName, cb) {
+        this.Db.list({enable: true, domain: domainName, event: eventName}, (err, res) => {
+            if (err)
+                return cb(err);
+
+            if (res.length > 0) {
+                let result = [];
+                res.forEach((item) => {
+                    result.push(new Hook(item));
+                });
+                return cb(null, result);
+            };
+            return cb(null, []);
         });
     };
 
@@ -100,13 +150,7 @@ class Trigger {
             if (res.length > 0) {
                 res.forEach((item) => {
                     if (item.event && item.domain && item.action) {
-                        scope.subscribeEsl(item.event);
-                        let hook = new Hook(item.event, item.domain, item.action, item.filter),
-                            hooks = scope.hooks.get(hook.getId());
-                        if (hooks)
-                            hooks.push(hook);
-                        else scope.hooks.add(hook.getId(), [hook]);
-
+                        scope.subscribe(item.event);
                     } else {
                         log.warn('Bad hook: ', item);
                     }
@@ -118,15 +162,15 @@ class Trigger {
         })
     };
 
-    subscribeEsl (eventName) {
-        if (~this._fsEvents.indexOf(eventName))
+    subscribe (eventName) {
+        if (~this._events.indexOf(eventName))
             return true;
         let scope = this;
-        this._app.Esl.filter('Event-Name', eventName, (e) => {
-            if (e.getHeader('Modesl-Reply-OK')) {
-                scope._fsEvents.push(eventName);
-            };
-            log.debug(e.getHeader('Reply-Text'));
+
+        this._app.Broker.bindHook(eventName, (e) => {
+            if (e)
+                log.error(e);
+            scope._events.push(eventName);
         });
     };
 
@@ -138,39 +182,43 @@ class Trigger {
         try {
             if (!eventName || !(e instanceof Object))
                 return false;
-            let hooks = this.hooks.get(this.toId(domain, eventName));
 
-            if (hooks instanceof Array) {
+            if (e.hasOwnProperty('Event-Subclass'))
+                eventName += '->' + e['Event-Subclass'];
+
+            this.find(eventName, domain, (err, hooks) => {
+                if (err)
+                    return log.error(err);
+
                 for (let hook of hooks)
                     if (hook.check(e))
                         this.send(hook, eventName, e);
-            }
+
+            });
         } catch (e) {
             log.error(e);
         };
     };
 
     send (hook, name, e) {
+        let message = new Message(name, e, hook.fields, hook.map);
 
-        let message = new Message(name, e),
-            strMeg = message.toString();
-
-        log.debug(`Send message: ${message.id}`);
+        log.trace(`Try send message: ${message.id}`);
+        let id = message.id;
         switch (hook.action.type) {
             case TYPES.WEB:
-                let option = url.parse(hook.action.url);
-                option.method = "POST";
-                option.headers = {
-                    'Content-Type': 'application/json',
-                    'Content-Length': strMeg.length
-                };
-                let req = http.request(option, (res)=> {
-                    //TODO add retry
-                    log.debug(`Response ${message.id} : ${res.statusCode}`);
-                });
+                request(
+                    message.toRequest(hook.action.url, hook.action.method),
+                    (err, response) => {
+                        if (err)
+                            return log.warn(err);
 
-                req.write(strMeg);
-                req.end();
+                        if (response.statusCode === 200)
+                            log.trace(`Send message: ${id}`);
+                        else log.warn(`Send message: ${id} status code: ${response.statusCode}`);
+                    }
+                );
+
                 break;
             default:
                 log.warn('Bad hook action: ', hook);
