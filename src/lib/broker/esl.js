@@ -66,6 +66,7 @@ class WebitelEsl extends EventEmitter2 {
 
     // TODO
     bindHook () {};
+    unBindHook () {};
 
 };
 

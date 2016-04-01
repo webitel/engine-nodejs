@@ -116,7 +116,7 @@ class Trigger {
         this._events = [];
 
         var scope = this;
-        //TODO ERROR;
+
         app.once('sys::eslConnect', ()=> {
             scope.Db = app.DB._query.hook;
             app.Broker.on('hookEvent', scope.emit.bind(scope));

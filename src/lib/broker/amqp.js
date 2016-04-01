@@ -23,7 +23,8 @@ class WebitelAmqp extends EventEmitter2 {
 
     get Exchange () {
         return {
-            FS_EVENT: "TAP.Events"
+            FS_EVENT: this.config.eventsExchange.channel,
+            FS_CC_EVENT: this.config.eventsExchange.cc
         };
     };
 
@@ -96,7 +97,6 @@ class WebitelAmqp extends EventEmitter2 {
         } catch (e) {
             log.error(e);
         }
-
     };
 
     unBindChannelEvents (caller) {
@@ -162,7 +162,7 @@ class WebitelAmqp extends EventEmitter2 {
         // CC
         channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
 
-            channel.bindQueue(qok.queue, scope.Exchange.FS_EVENT, "*.*.callcenter%3A%3Ainfo.*.*");
+            channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.callcenter%3A%3Ainfo.*.*.*");
 
             channel.consume(qok.queue, (msg) => {
                 try {
@@ -191,18 +191,18 @@ class WebitelAmqp extends EventEmitter2 {
         });
 
         //TODO webitel events
-        //channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
-        //
-        //    channel.bindQueue(qok.queue, scope.Exchange.FS_EVENT, "*.*.webitel%3A%3Aaccount_status.*.*");
-        //
-        //    channel.consume(qok.queue, (msg) => {
-        //        try {
-        //            console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
-        //        } catch (e) {
-        //            log.error(e);
-        //        }
-        //    }, {noAck: true});
-        //});
+        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+
+            channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Aaccount_status.*.*.*");
+
+            channel.consume(qok.queue, (msg) => {
+                try {
+                    console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
+                } catch (e) {
+                    log.error(e);
+                }
+            }, {noAck: true});
+        });
 
     };
 };

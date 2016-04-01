@@ -103,6 +103,10 @@
     "broker": {
         "amqp": {
             "uri": "amqp://localhost?heartbeat=0",
+            "eventsExchange": {
+                "channel": "TAP.Events",
+                "cc": "TAP.CC-Events"
+            },
             "exchange": {
                 "type": "topic",
                 "name": "Engine"
