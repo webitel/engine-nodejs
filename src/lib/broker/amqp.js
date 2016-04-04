@@ -108,15 +108,38 @@ class WebitelAmqp extends EventEmitter2 {
         }
     };
 
+
+    _parseHookEventName (eventName) {
+        let _e = eventName.split('->').map((value) => encodeRK(value) );
+
+        if (~eventName.indexOf('->webitel::')) {
+            return {
+                ex: this.Exchange.FS_CC_EVENT,
+                rk: `*.${_e[1]}.*.*.*`
+            };
+        } else if (~eventName.indexOf('callcenter')) {
+            //FreeSWITCH-Hostname.callcenter%3A%3Ainfo.member-queue-start.kkk%4010%2E10%2E10%2E144.6e4249b7-5595-40be-a819-42b467a2843b
+            return {
+                ex: this.Exchange.FS_CC_EVENT,
+                rk: `*.callcenter%3A%3Ainfo.${_e[1]}.*.*`
+            };
+        } else {
+            return {
+                ex: this.Exchange.FS_EVENT,
+                rk: `*.${_e[0]}.${_e[1] || '*' }.*.*`
+            }
+        }
+    };
+
     bindHook (event, cb) {
         try {
             if (!event)
                 return cb && cb(new Error("Bad event name"));
-            let _e = event.split('->').map((value)=>encodeRK(value) );
 
-            let rk = `*.${_e[0]}.${_e[1] || '*' }.*.*`;
+            let opt = this._parseHookEventName(event);
+
             if (this.channel)
-                this.channel.bindQueue(HOOK_QUEUE, this.Exchange.FS_EVENT, rk, {}, cb);
+                this.channel.bindQueue(HOOK_QUEUE, opt.ex, opt.rk, {}, cb);
         } catch (e) {
             log.error(e);
         }
@@ -126,10 +149,11 @@ class WebitelAmqp extends EventEmitter2 {
         try {
             if (!event)
                 return cb && cb(new Error("Bad event name"));
-            let _e = event.split('->').map((value)=>encodeRK(value) );
-            let rk = `*.${_e[0]}.${_e[1] || '*' }.*.*`;
+
+            let opt = this._parseHookEventName(event);
+
             if (this.channel)
-                this.channel.unbindQueue(HOOK_QUEUE, this.Exchange.FS_EVENT, rk, {}, cb);
+                this.channel.unbindQueue(HOOK_QUEUE, opt.ex, opt.rk, {}, cb);
         } catch (e) {
             log.error(e);
         }
@@ -191,18 +215,18 @@ class WebitelAmqp extends EventEmitter2 {
         });
 
         //TODO webitel events
-        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
-
-            channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Aaccount_status.*.*.*");
-
-            channel.consume(qok.queue, (msg) => {
-                try {
-                    console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
-                } catch (e) {
-                    log.error(e);
-                }
-            }, {noAck: true});
-        });
+        //channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+        //
+        //    channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Aaccount_status.*.*.*");
+        //
+        //    channel.consume(qok.queue, (msg) => {
+        //        try {
+        //            //console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
+        //        } catch (e) {
+        //            log.error(e);
+        //        }
+        //    }, {noAck: true});
+        //});
 
     };
 };
