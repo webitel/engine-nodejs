@@ -16,7 +16,6 @@ class WebitelAmqp extends EventEmitter2 {
         this.config = amqpConf;
         this.app = app;
         this.connect();
-        this._middlewares = {};
         this.queue = null;
         this.channel = null;
     };
@@ -107,7 +106,6 @@ class WebitelAmqp extends EventEmitter2 {
             log.error(e);
         }
     };
-
 
     _parseHookEventName (eventName) {
         let _e = eventName.split('->').map((value) => encodeRK(value) );
@@ -212,6 +210,8 @@ class WebitelAmqp extends EventEmitter2 {
                     log.error(e);
                 }
             }, {noAck: true});
+
+            scope.emit(`init:hook`);
         });
 
         //TODO webitel events

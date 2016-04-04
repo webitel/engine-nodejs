@@ -117,12 +117,28 @@ class Trigger {
 
         var scope = this;
 
-        app.once('sys::eslConnect', ()=> {
-            scope.Db = app.DB._query.hook;
-            app.Broker.on('hookEvent', scope.emit.bind(scope));
-            scope._init()
+        let dbConnected = false,
+            brokerConnected = false;
+        
+        var init = function () {
+            if (dbConnected && brokerConnected) {
+                scope._events.length = 0;
+                scope.Db = app.DB._query.hook;
+                scope._init()
+            }
+        };
+
+        app.Broker.on('init:hook', () => {
+            brokerConnected = true;
+            init();
         });
 
+        app.once('sys::eslConnect', ()=> {
+            dbConnected = true;
+            init();
+        });
+
+        app.Broker.on('hookEvent', scope.emit.bind(scope));
     };
 
     find (eventName, domainName, cb) {
@@ -169,7 +185,8 @@ class Trigger {
 
         this._app.Broker.bindHook(eventName, (e) => {
             if (e)
-                log.error(e);
+                return log.error(e);
+            log.debug(`subscribe ${eventName}`);
             scope._events.push(eventName);
         });
     };
