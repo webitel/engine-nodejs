@@ -5,6 +5,7 @@
 
 var log = require(__appRoot + '/lib/log')(module),
     EventEmitter2 = require('eventemitter2').EventEmitter2,
+    async = require('async'),
     Amqp = require('amqplib/callback_api');
 
 var HOOK_QUEUE = 'hooks';
@@ -161,75 +162,140 @@ class WebitelAmqp extends EventEmitter2 {
         let scope = this,
             channel = this.channel;
 
-        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
-            scope.queue = qok.queue;
+        async.waterfall(
+            [
+                // init channel event exchange
+                function (cb) {
+                    log.debug('Try init channel event exchange');
+                    channel.assertExchange(scope.Exchange.FS_EVENT, 'topic', {durable: true}, cb);
+                },
+                // init custom event exchange
+                function (_, cb) {
+                    log.debug('Try init custom event exchange');
+                    channel.assertExchange(scope.Exchange.FS_CC_EVENT, 'topic', {durable: true}, cb);
+                },
 
-            channel.consume(scope.queue, (msg) => {
-                try {
-                    let json = JSON.parse(msg.content.toString());
-                    // TODO https://freeswitch.org/jira/browse/FS-8817
-                    if (json['Event-Name'] == 'CUSTOM') return;
-                    scope.emit('callEvent', json);
-                } catch (e) {
-                    log.error(e);
+                //init channel queue
+                function (_, cb) {
+                    log.debug('Try init channel event queue');
+                    channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+                        scope.queue = qok.queue;
+
+                        channel.consume(scope.queue, (msg) => {
+                            try {
+                                let json = JSON.parse(msg.content.toString());
+                                // TODO https://freeswitch.org/jira/browse/FS-8817
+                                if (json['Event-Name'] == 'CUSTOM') return;
+                                scope.emit('callEvent', json);
+                            } catch (e) {
+                                log.error(e);
+                            }
+                        }, {noAck: true});
+
+                        let activeUsers = scope.app.Users.getKeys();
+                        activeUsers.forEach((userName) => {
+                            scope.bindChannelEvents({id: userName});
+                        });
+                        return cb(null, null);
+                    });
+                },
+
+                // init call center events
+                function (_, cb) {
+                    log.debug('Try init call center events queue');
+                    channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.callcenter%3A%3Ainfo.*.*.*");
+
+                        channel.consume(qok.queue, (msg) => {
+                            try {
+                                scope.emit('ccEvent', JSON.parse(msg.content.toString()));
+                            } catch (e) {
+                                log.error(e);
+                            }
+                        }, {noAck: true});
+
+                        return cb(null, null);
+                    });
+                },
+
+                // init hooks queue
+                function (_, cb) {
+                    log.debug('Try init hooks events queue');
+                    channel.assertQueue(HOOK_QUEUE, {autoDelete: false, durable: false, exclusive: false}, (err, qok) => {
+
+                        channel.consume(qok.queue, (msg) => {
+                            try {
+                                let e = JSON.parse(msg.content.toString()),
+                                    domain = getDomain(e);
+
+                                if (!domain) return;
+
+                                scope.emit('hookEvent', e['Event-Name'], domain, e);
+                            } catch (e) {
+                                log.error(e);
+                            }
+                        }, {noAck: true});
+
+                        scope.emit(`init:hook`);
+
+                        return cb(null, null);
+                    });
+                },
+
+                // init console event
+                function (_, cb) {
+                    log.debug('Try init console event queue');
+                    channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Aaccount_status.*.*.*");
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Auser_create.*.*.*");
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Auser_destroy.*.*.*");
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Adomain_create.*.*.*");
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Adomain_destroy.*.*.*");
+
+                        channel.consume(qok.queue, (msg) => {
+                            try {
+                                let event = JSON.parse(msg.content.toString());
+                                scope.emit('webitelEvent', parseConsoleEvent(event));
+                            } catch (e) {
+                                log.error(e);
+                            }
+                        }, {noAck: true});
+                    });
                 }
-            }, {noAck: true});
-
-            let activeUsers = scope.app.Users.getKeys();
-            activeUsers.forEach((userName) => {
-                scope.bindChannelEvents({id: userName});
+            ],
+            (err, res) => {
+                if (err)
+                    return log.error(err);
+                log.info('Init AMQP: OK');
             });
-        });
-
-        // CC
-        channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
-
-            channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.callcenter%3A%3Ainfo.*.*.*");
-
-            channel.consume(qok.queue, (msg) => {
-                try {
-                    scope.emit('ccEvent', JSON.parse(msg.content.toString()));
-                } catch (e) {
-                    log.error(e);
-                }
-            }, {noAck: true});
-        });
-
-        //hooks
-        channel.assertQueue(HOOK_QUEUE, {autoDelete: false, durable: false, exclusive: false}, (err, qok) => {
-
-            channel.consume(qok.queue, (msg) => {
-                try {
-                    let e = JSON.parse(msg.content.toString()),
-                        domain = getDomain(e);
-
-                    if (!domain) return;
-
-                    scope.emit('hookEvent', e['Event-Name'], domain, e);
-                } catch (e) {
-                    log.error(e);
-                }
-            }, {noAck: true});
-
-            scope.emit(`init:hook`);
-        });
-
-        //TODO webitel events
-        //channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
-        //
-        //    channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Aaccount_status.*.*.*");
-        //
-        //    channel.consume(qok.queue, (msg) => {
-        //        try {
-        //            //console.dir(JSON.parse(msg.content.toString())['Channel-Presence-ID']);
-        //        } catch (e) {
-        //            log.error(e);
-        //        }
-        //    }, {noAck: true});
-        //});
-
     };
 };
+
+const WEBITEL_EVENT = {
+    "webitel::account_status": "ACCOUNT_STATUS",
+    "webitel::user_create": "USER_CREATE",
+    "webitel::user_destroy": "USER_DESTROY",
+    "webitel::domain_create": "DOMAIN_CREATE",
+    "webitel::domain_destroy": "DOMAIN_DESTROY"
+};
+
+const ALLOW_CONSOLE_HEADER = ['Account-Domain', 'Account-Role', 'Account-Status', 'Account-User', 'Account-User-State',
+    'Event-Account', 'Event-Date-Timestamp', 'Event-Domain', 'Domain-Name', 'variable_customer_id', 'User-Domain', 'User-ID',
+    'User-State'];
+
+function parseConsoleEvent (e) {
+    let event = {
+        "Event-Name": WEBITEL_EVENT[e['Event-Subclass']]
+    };
+
+    for (let i = 0, len = ALLOW_CONSOLE_HEADER.length; i < len; i++)
+        if (e.hasOwnProperty(ALLOW_CONSOLE_HEADER[i]))
+            event[ALLOW_CONSOLE_HEADER[i]] = e[ALLOW_CONSOLE_HEADER[i]];
+
+    return event
+}
 
 function encodeRK (rk) {
     try {

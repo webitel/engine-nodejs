@@ -63,10 +63,6 @@ class Application extends EventEmitter2 {
         this.once('sys::connectEsl', function () {
             scope.configureExpress();
             conferenceService._runAutoDeleteUser(scope);
-            /**
-             * Init outbound
-             */
-            //outQueryService._init(scope);
         });
 
         scope.on('sys::connectDbError', (err) => {
@@ -196,10 +192,7 @@ class Application extends EventEmitter2 {
 
         wconsole.on('webitel::event::auth::success', function () {
             log.info('Connect Webitel: %s:%s', this.host, this.port);
-            //scope.emit('sys::wConsoleConnect');
-            // TODO move to conf
-            wconsole.subscribe(["USER_CREATE", "USER_DESTROY", "DOMAIN_CREATE", "DOMAIN_DESTROY", "ACCOUNT_STATUS"]);
-            require('./adapter/ws/handleWConsoleEvent')(scope);
+            scope.emit('sys::wConsoleConnect');
 
             wconsole._getServerId((err, res) => {
                 if (err)

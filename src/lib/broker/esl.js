@@ -44,6 +44,14 @@ class WebitelEsl extends EventEmitter2 {
                     return scope.emit('callEvent', e.serialize('json', 1))
             });
         });
+
+        application.on('sys::wConsoleConnect', () => {
+            let wConsole = application.WConsole,
+                scope = this
+                ;
+            wConsole.subscribe(["USER_CREATE", "USER_DESTROY", "DOMAIN_CREATE", "DOMAIN_DESTROY", "ACCOUNT_STATUS"]);
+            wConsole.on('webitel::event::event::**', (e) => scope.emit('webitelEvent', e.serialize('json', 1)));
+        });
     };
 
     bindChannelEvents (caller, cb) {
