@@ -3,8 +3,8 @@ var conf = require('../conf');
 require('winston-logstash');
 
 function getLogger(module) {
-    var pathDirectory = module.filename.split('//').slice(-2).join('//').split('\\');
-    var path = pathDirectory.slice(pathDirectory.length - 3).join('\\') + '(' + process.pid + ')';
+    var pathDirectory = module.filename.split(/\/+/).slice(-3);
+    var path = pathDirectory.join('\\') + '(' + process.pid + ')';
 
     var logLevels = {
         levels: {
