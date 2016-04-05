@@ -263,6 +263,7 @@ class WebitelAmqp extends EventEmitter2 {
                             }
                         }, {noAck: true});
                     });
+                    return cb(null, null);
                 }
             ],
             (err, res) => {
