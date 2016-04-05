@@ -40,7 +40,7 @@
         "reconnect": 5
     },
     "freeSWITCH": {
-        "host": "172.17.0.1"
+        "host": "172.17.0.1",
         "port": 8021,
         "pwd": "ClueCon",
         "reconnect": 5
