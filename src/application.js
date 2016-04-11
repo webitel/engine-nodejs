@@ -15,7 +15,8 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     initDb = require('./db'),
     plainTableToJSONArray = require('./utils/parse').plainTableToJSONArray,
     Broker = require('./lib/broker/index'),
-    Hooks = require('./services/hook/hookClass');
+    Hooks = require('./services/hook/hookClass'),
+    checkEslError = require('./middleware/checkEslError')
     //outQueryService = require('./services/outboundQueue')
     ;
 
@@ -60,7 +61,7 @@ class Application extends EventEmitter2 {
             scope.connectToWConsole();
         });
 
-        this.once('sys::connectEsl', function () {
+        this.once('sys::connectFsApi', function () {
             scope.configureExpress();
             conferenceService._runAutoDeleteUser(scope);
         });
@@ -82,91 +83,47 @@ class Application extends EventEmitter2 {
     }
 
     connectToEsl() {
-        var waitTimeReconnectFreeSWITCH = conf.get('freeSWITCH:reconnect') * 1000,
-            scope = this;
-        if (this.Esl && this.Esl.connected) {
-            return;
+        this.Esl = this.Broker;
+
+        let scope = this;
+
+        function loadTiers() {
+            scope.Broker.bgapi('callcenter_config tier list', function (res) {
+
+                if (checkEslError(res)) {
+                    setTimeout(loadTiers, 5000);
+                    return log.error('Load tiers response undefined !!!');
+                };
+
+                let body = res['body'];
+
+                scope.emit('sys::connectFsApi');
+
+                plainTableToJSONArray(body, function (err, result) {
+                    if (err) {
+                        return log.error(err);
+                    };
+                    scope.Agents.removeAll();
+                    if (result instanceof Array) {
+                        let _tmp;
+                        result.forEach(function (item) {
+                            let agent = scope.Agents.get(item['agent']);
+                            if (!agent) {
+                                _tmp = {};
+                                _tmp[item['queue']] = item;
+                                scope.Agents.add(item['agent'], _tmp);
+                            } else {
+                                agent[item['queue']] = item;
+                            };
+                        });
+                    };
+
+                }, '|')
+            });
         };
 
-        var esl = this.Esl = new Esl.Connection(conf.get('freeSWITCH:host'),
-            conf.get('freeSWITCH:port'),
-            conf.get('freeSWITCH:pwd'),
-            function() {
-                log.info('Connect freeSWITCH: %s:%s', conf.get('freeSWITCH:host'), conf.get('freeSWITCH:port'));
-                this.apiCallbackQueue.length = 0;
-                scope.emit('sys::eslConnect');
-
-                //TODO
-                log.info('Load tiers');
-                this.bgapi('callcenter_config tier list', function (res) {
-                    let body = res && res['body'];
-                    if (!body) {
-                        return log.error('Load tiers response undefined !!!');
-                    };
-                    plainTableToJSONArray(body, function (err, result) {
-                        if (err) {
-                            return log.error(err);
-                        };
-                        scope.Agents.removeAll();
-                        if (result instanceof Array) {
-                            let _tmp;
-                            result.forEach(function (item) {
-                                let agent = scope.Agents.get(item['agent']);
-                                if (!agent) {
-                                    _tmp = {};
-                                    _tmp[item['queue']] = item;
-                                    scope.Agents.add(item['agent'], _tmp);
-                                } else {
-                                    agent[item['queue']] = item;
-                                };
-                            });
-                        };
-
-                    }, '|')
-                });
-            });
-
-        esl.on('error', function(e) {
-            log.error('freeSWITCH connect error:', e);
-            esl.connected = false;
-
-            setTimeout(function () {
-                scope.connectToEsl();
-            }, waitTimeReconnectFreeSWITCH);
-        });
-
-        esl.on('esl::event::auth::success', function () {
-            esl.connected = true;
-            console.log('>>> esl::event::auth::success');
-            scope.emit('sys::connectEsl');
-        });
-
-        esl.on('esl::event::auth::fail', function () {
-            esl['authed'] = false;
-            log.error('esl::event::auth::fail');
-            scope.stop(new Error('Auth freeSWITH fail, please enter the correct password.'));
-        });
-
-        esl.on('esl::end', function () {
-            esl.connected = false;
-
-            log.error('FreeSWITCH: socket close.');
-            setTimeout(function () {
-                scope.connectToEsl();
-            }, waitTimeReconnectFreeSWITCH);
-        });
-
-        esl.on('esl::event::disconnect::notice', function() {
-            log.error('esl::event::disconnect::notice');
-            this.apiCallbackQueue.length = 0;
-            this.cmdCallbackQueue.length = 0;
-            esl.connected = false;
-
-            setTimeout(function () {
-                scope.connectToEsl();
-            }, waitTimeReconnectFreeSWITCH);
-        });
-    }
+        loadTiers();
+    };
 
     connectToWConsole () {
         var scope = this,

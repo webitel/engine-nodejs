@@ -6,31 +6,47 @@
 var log = require(__appRoot + '/lib/log')(module),
     EventEmitter2 = require('eventemitter2').EventEmitter2,
     async = require('async'),
+    generateUuid = require('node-uuid'),
     Amqp = require('amqplib/callback_api');
 
-var HOOK_QUEUE = 'hooks';
+const HOOK_QUEUE = 'hooks';
+
+const _onReturnedMessage = Symbol('onReturnedMessage'),
+      _onRequestFsApi = Symbol('onRequestFsApi'),
+    _stackCb = Symbol('stackCb')
+    ;
 
 class WebitelAmqp extends EventEmitter2 {
 
     constructor (amqpConf, app) {
         super();
+        this.bgapi = this.api;
         this.config = amqpConf;
         this.app = app;
         this.connect();
         this.queue = null;
         this.channel = null;
+        this._instanceId = generateUuid.v4();
+        this[_stackCb] = {};
     };
 
     get Exchange () {
         return {
             FS_EVENT: this.config.eventsExchange.channel,
-            FS_CC_EVENT: this.config.eventsExchange.cc
+            FS_CC_EVENT: this.config.eventsExchange.cc,
+            FS_COMMANDS: this.config.eventsExchange.commands
         };
     };
 
     connect () {
         let scope = this,
             timerId;
+
+        setInterval(()=> {
+            scope.api('status', (res) => {
+                //console.log(res.body);
+            });
+        }, 0);
 
         function start () {
             if (timerId)
@@ -41,7 +57,9 @@ class WebitelAmqp extends EventEmitter2 {
 
                 if (scope.channel) {
                     //scope.channel.close();
+                    scope.channel.removeAllListeners('return');
                     scope.channel = null;
+                    scope[_stackCb] = {};
                 }
             };
             try {
@@ -77,8 +95,9 @@ class WebitelAmqp extends EventEmitter2 {
                         channel.on('error', (e) => {
                             log.error(e);
                         });
-                        scope.channel = channel;
-                        scope.init();
+                        channel.on('return', scope[_onReturnedMessage].bind(scope));
+
+                        scope.init(channel);
                     });
                 });
 
@@ -91,7 +110,7 @@ class WebitelAmqp extends EventEmitter2 {
 
     bindChannelEvents (caller, cb) {
         let ch = this.channel;
-        if (!ch || !this.queue) return cb(new Error('No connect.'));
+        if (!ch || !this.queue) return cb && cb(new Error('No connect.'));
         try {
             ch.bindQueue(this.queue, this.Exchange.FS_EVENT, getPresenceRoutingFromCaller(caller), {}, cb);
         } catch (e) {
@@ -158,9 +177,11 @@ class WebitelAmqp extends EventEmitter2 {
         }
     };
 
-    init () {
-        let scope = this,
-            channel = this.channel;
+    // TODO
+    disconnect () {};
+
+    init (channel) {
+        let scope = this;
 
         async.waterfall(
             [
@@ -264,13 +285,114 @@ class WebitelAmqp extends EventEmitter2 {
                         }, {noAck: true});
                     });
                     return cb(null, null);
+                },
+                
+                //init commands
+                function (_, cb) {
+                    log.debug('Try init switch commands queue response');
+                    channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_COMMANDS, `engine.${scope._instanceId}.#`);
+
+                        channel.consume(qok.queue, scope[_onRequestFsApi].bind(scope), {noAck: true}, cb);
+                    });
                 }
             ],
-            (err, res) => {
+            (err) => {
                 if (err)
                     return log.error(err);
                 log.info('Init AMQP: OK');
+
+                scope.channel = channel;
             });
+    };
+
+    [_onReturnedMessage] (msg) {
+        if (!msg) return;
+
+        let rk = msg.properties.headers['x-fs-api-resp-key'],
+            jobId = getLastKey(rk), //rk.substring(rk.lastIndexOf('.') + 1);
+            _cb = this[_stackCb][jobId]
+            ;
+        if (_cb)
+            delete this[_stackCb][jobId];
+        else log.error('bad jobId: ', jobId);
+
+        if (typeof _cb == 'function')
+            _cb({body: "-ERR FreeSWITCH not found."});
+
+        log.error('Bad gateway');
+    };
+
+    [_onRequestFsApi] (msg) {
+        try {
+
+            let rk = msg.fields.routingKey,
+                jobId = getLastKey(rk),
+                _msg = msg.content.toString(),
+                _cb = this[_stackCb][jobId]
+                ;
+            if (this[_stackCb][jobId])
+                delete this[_stackCb][jobId];
+            else log.error('Bad job', jobId);
+
+            //console.log(`Count stack ${Object.keys(this[_stackCb]).length}`);
+            log.trace(`Response fs-api: ${jobId}`);
+
+            if (msg.properties.contentType == "text/json")
+                _msg = JSON.parse(_msg);
+
+            if (typeof _cb === "function")
+                _cb({body: _msg.output}); //TODO new Api response
+
+        } catch (e) {
+            log.error(e);
+        }
+    };
+
+    api (command, args, jobid, cb) {
+
+        if(typeof args === 'function') {
+            cb = args;
+            args = '';
+            jobid = null;
+        }
+
+        if(typeof jobid === 'function') {
+            cb = jobid;
+            jobid = null;
+        }
+
+        if (!this.channel)
+            return cb & cb({body: "Channel not open"}); // TODO new response API
+
+        args = args || '';
+
+        if(args instanceof Array)
+            args = args.join(' ');
+
+        command += ' ' + args;
+
+        jobid = jobid || generateUuid.v4();
+
+
+        this[_stackCb][jobid] = cb;
+        log.trace(`Execute fs-api: ${command} -> ${jobid}`);
+
+        this.channel.publish(
+            this.Exchange.FS_COMMANDS,
+            'commandBindingKey',
+            new Buffer(command),
+            {
+                headers: {
+                    "x-fs-api-resp-exchange": this.Exchange.FS_COMMANDS,
+                    "x-fs-api-resp-key": `engine.${this._instanceId}.${jobid}`
+                },
+                mandatory: true,
+                //deliveryMode: 2
+            }
+        );
+
     };
 };
 
@@ -332,6 +454,11 @@ function getDomain (data) {
 
     if (data['Channel-Presence-ID'])
         return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1)
-}
+};
+
+function getLastKey (rk) {
+    let arr = (rk || "").split('.');
+    return arr[arr.length - 1];
+};
 
 module.exports = WebitelAmqp;

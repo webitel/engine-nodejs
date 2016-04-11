@@ -21,8 +21,11 @@ class Broker {
         if (conf.hasOwnProperty('amqp')) {
             configBroker = conf.amqp;
             return new WebitelAmqp(configBroker, app);
+        } else if (conf.hasOwnProperty('esl')) {
+            configBroker = conf.esl;
+            return new WebitelEsl(configBroker, app)
         } else {
-            return new WebitelEsl(app)
+            app.stop(new Error("Broker config require."));
         }
     };
 

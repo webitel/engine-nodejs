@@ -65,22 +65,6 @@
         },
         "socketTimeUnauthorized": 5,
         "sleepConnectToWebitel": 1000,
-        "freeSWITCHEvents": [
-            "CHANNEL_CREATE",
-            "CHANNEL_DESTROY",
-            "CHANNEL_CALLSTATE",
-            "CHANNEL_ANSWER",
-            "CHANNEL_HANGUP_COMPLETE",
-            "CHANNEL_HANGUP",
-            "CHANNEL_HOLD",
-            "CHANNEL_UNHOLD",
-            "CHANNEL_BRIDGE",
-            "CHANNEL_UNBRIDGE",
-            "CHANNEL_UUID",
-            "DTMF",
-            "CHANNEL_DATA",
-            "CUSTOM callcenter::info"
-        ],
         "callCentre": {
             "diffAgentLogoutTimeSec": 60,
             "scheduleLogoutSec": 60
@@ -102,11 +86,17 @@
         "scheduleHour": 5
     },
     "broker": {
+        "esl": {
+            "host": "172.17.0.1",
+            "port": 8021,
+            "pwd": "ClueCon"
+        },
         "amqp": {
-            "uri": "amqp://rabbitmq?heartbeat=0",
+            "uri": "amqp://10.10.10.25?heartbeat=0",
             "eventsExchange": {
                 "channel": "TAP.Events",
-                "cc": "TAP.CC-Events"
+                "cc": "TAP.CC-Events",
+                "commands": "TAP.Commands"
             },
             "exchange": {
                 "type": "topic",
