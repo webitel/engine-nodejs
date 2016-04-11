@@ -42,11 +42,11 @@ class WebitelAmqp extends EventEmitter2 {
         let scope = this,
             timerId;
 
-        setInterval(()=> {
-            scope.api('status', (res) => {
-                //console.log(res.body);
-            });
-        }, 0);
+        //setInterval(()=> {
+        //    scope.api('status', (res) => {
+        //        //console.log(res.body);
+        //    });
+        //}, 0);
 
         function start () {
             if (timerId)
