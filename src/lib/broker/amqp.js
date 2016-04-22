@@ -394,6 +394,62 @@ class WebitelAmqp extends EventEmitter2 {
         );
 
     };
+
+    show (item, format, cb) {
+        if(typeof format === 'function') {
+            cb = format;
+            format = null;
+        }
+
+        format = format || 'json';
+
+        this.api('show ' + item + ' as ' + format, (e) => {
+            var data = e.body || "", parsed = {};
+
+            //if error send them that
+            if(data.indexOf('-ERR') !== -1) {
+                if(cb) cb(new Error(data));
+                return;
+            };
+
+            switch(format) {
+                case 'json':
+                    try { parsed = JSON.parse(data); }
+                    catch(e) { if(cb) cb(e); return; }
+
+                    if(!parsed.rows) parsed.rows = [];
+
+                    break;
+
+                case 'xml':
+                    // TODO
+                    break;
+
+                default: //delim seperated values, custom parsing
+                    if(format.indexOf('delim')) {
+                        var delim = format.replace('delim ', ''),
+                            lines = data.split('\n'),
+                            cols = lines[0].split(delim);
+
+                        parsed = { rowCount: lines.length - 1, rows: [] };
+
+                        for(var i = 1, len = lines.length; i < len; ++i) {
+                            var vals = lines[i].split(delim),
+                                o = {};
+                            for(var x = 0, xlen = vals.length; x < xlen; ++x) {
+                                o[cols[x]] = vals[x];
+                            }
+
+                            parsed.rows.push(o);
+                        }
+                    }
+                    break;
+            };
+
+            if(cb) cb(null, parsed, data);
+            return;
+        })
+    }
 };
 
 const WEBITEL_EVENT = {

@@ -15,7 +15,7 @@ function initConnect (server) {
             log.error('Connect db error: %s', err.message);
             return server.emit('sys::connectDbError', err);
         };
-
+        log.info('Connected db %s ', config.get('mongodb:uri'));
         require('./query/initCollections')(db);
 
         db._query = {
@@ -30,11 +30,12 @@ function initConnect (server) {
             location: require('./query/location').addQuery(db),
             conference: require('./query/conference').addQuery(db),
             acl: require('./query/acl').addQuery(db),
-            hook: require('./query/hook').addQuery(db)
+            hook: require('./query/hook').addQuery(db),
+            calendar: require('./query/calendar').addQuery(db)
         };
 
         server.emit('sys::connectDb', db);
-        log.info('Connected db %s ', config.get('mongodb:uri'));
+
         db.on('close', function () {
             log.warn('close MongoDB');
         });

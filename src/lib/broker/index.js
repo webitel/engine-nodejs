@@ -8,7 +8,8 @@
 var log = require(__appRoot + '/lib/log')(module),
     util = require('util'),
     WebitelAmqp = require('./amqp'),
-    WebitelEsl = require('./esl')
+    WebitelEsl = require('./esl'),
+    url = require('url')
     ;
 
 
@@ -18,15 +19,27 @@ class Broker {
             throw "Bad config broker";
 
         let configBroker;
-        if (conf.hasOwnProperty('amqp')) {
-            configBroker = conf.amqp;
+
+        if (/^amqp:\/\//.test(conf.connectionString)) {
+            configBroker = {
+                "uri": conf.connectionString,
+                "eventsExchange": conf.config.eventsExchange,
+                "exchange": conf.config.exchange
+            };
             return new WebitelAmqp(configBroker, app);
-        } else if (conf.hasOwnProperty('esl')) {
-            configBroker = conf.esl;
-            return new WebitelEsl(configBroker, app)
+
+        } else if (/^esl:\/\//.test(conf.connectionString)) {
+            let parseUri = url.parse(conf.connectionString);
+            configBroker = {
+                "host": parseUri.hostname,
+                "port": +parseUri.port,
+                "pwd": parseUri.auth.split(':')[1]
+            };
+            return new WebitelEsl(configBroker, app);
         } else {
             app.stop(new Error("Broker config require."));
-        }
+        };
+
     };
 
 };

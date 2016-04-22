@@ -39,12 +39,6 @@
         "secret": "ROOT_PASSWORD",
         "reconnect": 5
     },
-    "freeSWITCH": {
-        "host": "172.17.0.1",
-        "port": 8021,
-        "pwd": "ClueCon",
-        "reconnect": 5
-    },
     "cdrServer": {
         "host": "http://cdr:10023",
         "useProxy": false
@@ -86,13 +80,8 @@
         "scheduleHour": 5
     },
     "broker": {
-        "esl": {
-            "host": "172.17.0.1",
-            "port": 8021,
-            "pwd": "ClueCon"
-        },
-        "amqp": {
-            "uri": "amqp://10.10.10.25?heartbeat=0",
+        "connectionString": "amqp://webitel:secret@pre.webitel.com:5672?heartbeat=0",
+        "config": {
             "eventsExchange": {
                 "channel": "TAP.Events",
                 "cc": "TAP.CC-Events",

@@ -796,7 +796,7 @@ Webitel.prototype.queueCreate = function (_caller, args, cb) {
 
 Webitel.prototype.queueItem = function (_caller, args, cb) {
 
-    var _params = 'queue ' + args['name'] + '@' + args['domain'],
+    var _params = 'queue ' + `'${args['name']}` + '@' + args['domain'] + '\'',
         self = this
         ;
     this.api(WebitelCommandTypes.CallCenter.Root, [_params], function (res) {

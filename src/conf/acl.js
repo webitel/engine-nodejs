@@ -17,6 +17,7 @@ const RESOURCES = [
     'acl/resource',
 
     'blacklist',
+    'calendar',
 
     'rotes/default',
     'rotes/public',
@@ -59,6 +60,7 @@ module.exports = [
             'acl/resource': ["*"],
 
             'blacklist': ["*"],
+            'calendar': ["*"],
 
             // TODO rename !!!
             'rotes/default': ["*"],
@@ -111,6 +113,7 @@ module.exports = [
         parents: 'user',
         allows: {
             'blacklist': ["*"],
+            'calendar': ["*"],
 
             'rotes/default': ["*"],
             'rotes/public': ["*"],

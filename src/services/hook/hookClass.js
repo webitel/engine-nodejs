@@ -123,7 +123,6 @@ class Trigger {
         var init = function () {
             if (dbConnected && brokerConnected) {
                 scope._events.length = 0;
-                scope.Db = app.DB._query.hook;
                 scope._init()
             }
         };
@@ -133,7 +132,8 @@ class Trigger {
             init();
         });
 
-        app.once('sys::eslConnect', ()=> {
+        app.once('sys::connectDb', (db)=> {
+            scope.Db = db._query.hook;
             dbConnected = true;
             init();
         });
