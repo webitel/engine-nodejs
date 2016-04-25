@@ -51,7 +51,7 @@ class WebitelEsl extends EventEmitter2 {
             esl.subscribe([
                 "CHANNEL_CREATE",
                 "CHANNEL_DESTROY",
-                "CHANNEL_CALLSTATE",
+                "CHANNEL_STATE",
                 "CHANNEL_ANSWER",
                 "CHANNEL_HANGUP_COMPLETE",
                 "CHANNEL_HANGUP",
