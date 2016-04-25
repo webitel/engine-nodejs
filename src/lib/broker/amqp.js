@@ -70,13 +70,13 @@ class WebitelAmqp extends EventEmitter2 {
                         closeChannel();
                         timerId = setTimeout(start, 5000);
                         return;
-                    };
+                    }
 
                     log.info('[AMQP] connect: OK');
                     conn.on('error', (err)=> {
                         if (err.message !== "Connection closing") {
                             log.error("conn error", err);
-                        };
+                        }
                         conn.close();
                     });
                     conn.on('close', (err)=> {
@@ -91,7 +91,7 @@ class WebitelAmqp extends EventEmitter2 {
                             closeChannel();
                             timerId = setTimeout(start, 5000);
                             return;
-                        };
+                        }
                         channel.on('error', (e) => {
                             log.error(e);
                         });
@@ -104,7 +104,7 @@ class WebitelAmqp extends EventEmitter2 {
             } catch (e) {
                 log.error(e);
             }
-        };
+        }
         start();
     };
 
@@ -381,14 +381,14 @@ class WebitelAmqp extends EventEmitter2 {
 
         this.channel.publish(
             this.Exchange.FS_COMMANDS,
-            'commandBindingKey',
+            'commandBindingKey', //TODO move config
             new Buffer(command),
             {
                 headers: {
                     "x-fs-api-resp-exchange": this.Exchange.FS_COMMANDS,
                     "x-fs-api-resp-key": `engine.${this._instanceId}.${jobid}`
                 },
-                mandatory: true,
+                mandatory: true
                 //deliveryMode: 2
             }
         );
@@ -410,7 +410,7 @@ class WebitelAmqp extends EventEmitter2 {
             if(data.indexOf('-ERR') !== -1) {
                 if(cb) cb(new Error(data));
                 return;
-            };
+            }
 
             switch(format) {
                 case 'json':
@@ -444,13 +444,12 @@ class WebitelAmqp extends EventEmitter2 {
                         }
                     }
                     break;
-            };
+            }
 
             if(cb) cb(null, parsed, data);
-            return;
         })
     }
-};
+}
 
 const WEBITEL_EVENT = {
     "webitel::account_status": "ACCOUNT_STATUS",
@@ -496,7 +495,7 @@ function getPresenceRoutingFromCaller (caller) {
         log.error(e);
         return null;
     }
-};
+}
 
 function getDomain (data) {
     if (!data)
@@ -510,11 +509,11 @@ function getDomain (data) {
 
     if (data['Channel-Presence-ID'])
         return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1)
-};
+}
 
 function getLastKey (rk) {
     let arr = (rk || "").split('.');
     return arr[arr.length - 1];
-};
+}
 
 module.exports = WebitelAmqp;

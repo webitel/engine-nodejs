@@ -32,7 +32,7 @@ class Application extends EventEmitter2 {
         this.OutboundQuery = new Collection('id');
         this.loggedOutAgent = new Collection('id');
         this.Broker = new Broker(conf.get('broker'), this);
-        this.Hooks = new Hooks(this);
+        new Hooks(this);
         process.nextTick(this.connectDb.bind(this));
     }
 
@@ -79,10 +79,97 @@ class Application extends EventEmitter2 {
                 gc();
                 console.log('----------------- GC -----------------');
             }, 5000);
-        };
+        }
     }
 
     connectToEsl() {
+
+        var waitTimeReconnectFreeSWITCH = conf.get('freeSWITCH:reconnect') * 1000,
+            scope = this;
+        if (this.Esl && this.Esl.connected) {
+            return;
+        }
+
+        var esl = this.Esl = new Esl.Connection(conf.get('freeSWITCH:host'),
+            conf.get('freeSWITCH:port'),
+            conf.get('freeSWITCH:pwd'),
+            function() {
+                log.info('Connect freeSWITCH: %s:%s', conf.get('freeSWITCH:host'), conf.get('freeSWITCH:port'));
+                this.apiCallbackQueue.length = 0;
+                scope.emit('sys::eslConnect');
+
+                //TODO
+                log.info('Load tiers');
+                this.bgapi('callcenter_config tier list', function (res) {
+                    let body = res && res['body'];
+                    if (!body) {
+                        return log.error('Load tiers response undefined !!!');
+                    }
+                    plainTableToJSONArray(body, function (err, result) {
+                        if (err) {
+                            return log.error(err);
+                        }
+                        scope.Agents.removeAll();
+                        if (result instanceof Array) {
+                            let _tmp;
+                            result.forEach(function (item) {
+                                let agent = scope.Agents.get(item['agent']);
+                                if (!agent) {
+                                    _tmp = {};
+                                    _tmp[item['queue']] = item;
+                                    scope.Agents.add(item['agent'], _tmp);
+                                } else {
+                                    agent[item['queue']] = item;
+                                }
+                            });
+                        }
+
+                    }, '|')
+                });
+            });
+
+        esl.on('error', function(e) {
+            log.error('freeSWITCH connect error:', e);
+            esl.connected = false;
+
+            setTimeout(function () {
+                scope.connectToEsl();
+            }, waitTimeReconnectFreeSWITCH);
+        });
+
+        esl.on('esl::event::auth::success', function () {
+            esl.connected = true;
+            console.log('>>> esl::event::auth::success');
+            scope.emit('sys::connectFsApi');
+        });
+
+        esl.on('esl::event::auth::fail', function () {
+            esl['authed'] = false;
+            log.error('esl::event::auth::fail');
+            scope.stop(new Error('Auth freeSWITH fail, please enter the correct password.'));
+        });
+
+        esl.on('esl::end', function () {
+            esl.connected = false;
+
+            log.error('FreeSWITCH: socket close.');
+            setTimeout(function () {
+                scope.connectToEsl();
+            }, waitTimeReconnectFreeSWITCH);
+        });
+
+        esl.on('esl::event::disconnect::notice', function() {
+            log.error('esl::event::disconnect::notice');
+            this.apiCallbackQueue.length = 0;
+            this.cmdCallbackQueue.length = 0;
+            esl.connected = false;
+
+            setTimeout(function () {
+                scope.connectToEsl();
+            }, waitTimeReconnectFreeSWITCH);
+        });
+
+        /** TODO check FS-9096 !!!
         this.Esl = this.Broker;
 
         let scope = this;
@@ -123,6 +210,8 @@ class Application extends EventEmitter2 {
         };
 
         loadTiers();
+
+         **/
     };
 
     connectToWConsole () {
@@ -178,7 +267,7 @@ class Application extends EventEmitter2 {
             }, conf.get('application:sleepConnectToWebitel'));
         } else {
             wconsole.connect();
-        };
+        }
     }
 
     configureExpress () {
@@ -206,7 +295,7 @@ class Application extends EventEmitter2 {
                     log.info('Server (http) listening on port ' + this.address().port);
                     scope.emit('sys::serverStart', this, false);
                 });
-            };
+            }
             ws(server, this);
 
         } catch (e) {
@@ -220,17 +309,17 @@ class Application extends EventEmitter2 {
         if (this.DB) {
             this.DB.close();
             log.info('Disconnect DB...');
-        };
+        }
 
         if (this.Esl) {
             this.Esl.disconnect();
             log.info('Disconnect ESL...');
-        };
+        }
 
         if (this.WConsole) {
             this.WConsole.disconnect();
             log.info('Disconnect WConsole...');
-        };
+        }
 
         process.exit(1);
     }
@@ -241,12 +330,12 @@ class Application extends EventEmitter2 {
         });
     }
 
-    broadcastWorkers (msg) {
-        process.send({
-            msg: msg
-        });
-    }
-};
+    //broadcastWorkers (msg) {
+    //    process.send({
+    //        msg: msg
+    //    });
+    //}
+}
 
 process.on('uncaughtException', function (err) {
     log.error('UncaughtException:', err.message);

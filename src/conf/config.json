@@ -32,6 +32,12 @@
         "collectionAclPermissions": "aclPermissions",
         "collectionHook": "hook"
     },
+    "freeSWITCH": {
+        "host": "172.17.0.1",
+        "port": 8021,
+        "pwd": "ClueCon",
+        "reconnect": 5
+    },
     "webitelServer": {
         "host": "CONSOLE_HOST",
         "port": "6873",
