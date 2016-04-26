@@ -12,7 +12,7 @@
         }
     },
     "mongodb": {
-        "uri": "mongodb://MONGODB_HOST:27017/webitel",
+        "uri": "mongodb://pre.webitel.com:27017/webitel",
         "collectionPublic": "public",
         "collectionDefault": "default",
         "collectionSystem": "global",
@@ -30,19 +30,20 @@
         "collectionConference": "conference",
         "collectionLocation": "location",
         "collectionAclPermissions": "aclPermissions",
-        "collectionHook": "hook"
+        "collectionHook": "hook",
+        "collectionDialer": "dialer"
     },
     "freeSWITCH": {
-        "host": "172.17.0.1",
+        "host": "pre.webitel.com",
         "port": 8021,
         "pwd": "ClueCon",
         "reconnect": 5
     },
     "webitelServer": {
-        "host": "CONSOLE_HOST",
+        "host": "pre.webitel.com",
         "port": "6873",
         "account": "root",
-        "secret": "ROOT_PASSWORD",
+        "secret": "secret",
         "reconnect": 5
     },
     "cdrServer": {
@@ -86,7 +87,7 @@
         "scheduleHour": 5
     },
     "broker": {
-        "connectionString": "amqp://webitel:ROOT_PASSWORD@172.17.0.1:5672?heartbeat=0",
+        "connectionString": "esl://webitel:ClueCon@pre.webitel.com:8021?heartbeat=0",
         "config": {
             "eventsExchange": {
                 "channel": "TAP.Events",

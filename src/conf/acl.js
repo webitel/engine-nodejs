@@ -30,6 +30,9 @@ const RESOURCES = [
     'cc/members',
     'cc/queue',
 
+    'dialer',
+    'dialer/members',
+
     'book',
     'hook',
 
@@ -73,6 +76,9 @@ module.exports = [
             'cc/tiers': ["*"],
             'cc/members': ["*"],
             'cc/queue': ["*"],
+
+            'dialer': ["*"],
+            'dialer/members': ["*"],
 
             'book': ["*"],
             'hook': ["*"],
@@ -125,6 +131,9 @@ module.exports = [
             'cc/tiers': ["*"],
             'cc/members': ["*"],
             'cc/queue': ["*"],
+
+            'dialer': ["*"],
+            'dialer/members': ["*"],
 
             'book': ["*"],
             'hook': ["*"],

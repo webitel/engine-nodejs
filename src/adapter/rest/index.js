@@ -44,6 +44,7 @@ require('./configure/configure.resource').addRoutes(api);
 require('./license/license.resource').addRoutes(api);
 require('./hook/hook.resource').addRoutes(api);
 require('./calendar/calendar.resource').addRoutes(api);
+require('./dialer/dialer.resource').addRoutes(api);
 
 // Error handle
 require('./error').addRoutes(api);

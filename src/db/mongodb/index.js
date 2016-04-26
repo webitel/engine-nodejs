@@ -31,7 +31,8 @@ function initConnect (server) {
             conference: require('./query/conference').addQuery(db),
             acl: require('./query/acl').addQuery(db),
             hook: require('./query/hook').addQuery(db),
-            calendar: require('./query/calendar').addQuery(db)
+            calendar: require('./query/calendar').addQuery(db),
+            dialer: require('./query/dialer').addQuery(db)
         };
 
         server.emit('sys::connectDb', db);
