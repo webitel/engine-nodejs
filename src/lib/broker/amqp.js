@@ -66,6 +66,7 @@ class WebitelAmqp extends EventEmitter2 {
 
                 Amqp.connect(scope.config.uri, (err, conn) => {
                     if (err) {
+                        // TODO Docker no reconnect...
                         log.error(err);
                         closeChannel();
                         timerId = setTimeout(start, 5000);
@@ -73,7 +74,7 @@ class WebitelAmqp extends EventEmitter2 {
                     }
 
                     log.info('[AMQP] connect: OK');
-                    conn.on('error', (err)=> {
+                    conn.on('error', (err) => {
                         if (err.message !== "Connection closing") {
                             log.error("conn error", err);
                         }

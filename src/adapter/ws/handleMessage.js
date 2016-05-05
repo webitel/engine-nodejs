@@ -133,6 +133,10 @@ function Handler(wss, application) {
         });
     });
     
+    application._getWSocketSessions = function () {
+        return wss.clients.length
+    };
+    
     application.broadcast = function (event, user) {
         if (user) {
             user.broadcastInDomain(event);

@@ -47,7 +47,7 @@
         "reconnect": 5
     },
     "cdrServer": {
-        "host": "http://cdr:10023",
+        "host": "http://10.10.10.25:10023",
         "useProxy": false
     },
     "application": {
@@ -79,7 +79,7 @@
         }
     },
     "conference": {
-        "enable": false,
+        "enable": true,
         "domain": "meeting",
         "validateMail": false,
         "validateUri": "https://webitel.com/",
@@ -87,7 +87,7 @@
         "scheduleHour": 5
     },
     "broker": {
-        "connectionString": "esl://webitel:ClueCon@pre.webitel.com:8021?heartbeat=0",
+        "connectionString": "amqp://webitel:secret@pre.webitel.com:5672?heartbeat=0",
         "config": {
             "eventsExchange": {
                 "channel": "TAP.Events",

@@ -113,7 +113,8 @@ function fakeCall (req, res, next) {
     var number = req.body.number || '',
         displayNumber = req.body.displayNumber || '00000',
         domainName = number.split('@')[1] || '',
-        dialString =  ''.concat('originate ', '{presence_data=@', domainName, '}[origination_caller_id_number=', displayNumber, ']', 'user/', number,
+        dialString =  ''.concat('originate ', '{presence_data=@', domainName, '}[sip_h_X-Test=', number.split('@')[0], ',origination_callee_id_number=',displayNumber,
+            ',origination_caller_id_number=', displayNumber, ']', 'user/', number,
             ' &bridge(sofia/external/test_terrasoft@switch-d1.webitel.com)');
     ;
 

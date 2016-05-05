@@ -48,13 +48,13 @@ let Utils = module.exports = {
             pageNumber = parseInt(options['pageNumber'], 10),
             domain = options.domain;
 
-        var query = Utils.buildFilterQuery(filter);
+        let query = Utils.buildFilterQuery(filter);
 
         if (domain) {
             query['$and'].push({
                 "domain": domain
             });
-        };
+        }
         try {
 
             db
