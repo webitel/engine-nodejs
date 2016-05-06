@@ -60,13 +60,14 @@ function addQuery (db) {
                     data.$set[key] = doc[key];
                 }
             };
-            console.log(_id);
-            console.log(domainName);
-            console.log(data);
             return db
                 .collection(dialerCollectionName)
                 .updateOne({_id: new ObjectID(_id), domain: domainName}, data, cb);
 
+        },
+        
+        memberList: function (options, cb) {
+            return utils.searchInCollection(db, 'agentStatusEngine', options, cb);
         }
     }
 }

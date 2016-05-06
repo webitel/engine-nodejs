@@ -10,7 +10,13 @@ var CodeError = require(__appRoot + '/lib/error'),
     ;
 
 let Service = {
-    
+
+    /**
+     *
+     * @param caller
+     * @param option
+     * @param cb
+     */
     list: function (caller, option, cb) {
         checkPermissions(caller, 'dialer', 'r', function (err) {
             if (err)
@@ -30,6 +36,12 @@ let Service = {
         });
     },
 
+    /**
+     *
+     * @param caller
+     * @param option
+     * @param cb
+     */
     item: function (caller, option, cb) {
         checkPermissions(caller, 'dialer', 'r', function (err) {
             if (err)
@@ -51,7 +63,13 @@ let Service = {
             return db.findById(option.id, domain, cb);
         });
     },
-    
+
+    /**
+     *
+     * @param caller
+     * @param option
+     * @param cb
+     */
     create: function (caller, option, cb) {
         checkPermissions(caller, 'dialer', 'd', function (err) {
             if (err)
@@ -75,6 +93,12 @@ let Service = {
         });
     },
 
+    /**
+     *
+     * @param caller
+     * @param option
+     * @param cb
+     */
     remove: function (caller, option, cb) {
         checkPermissions(caller, 'dialer', 'd', function (err) {
             if (err)
@@ -96,7 +120,13 @@ let Service = {
             return db.removeById(option.id, domain, cb);
         });
     },
-    
+
+    /**
+     *
+     * @param caller
+     * @param option
+     * @param cb
+     */
     update: function (caller, option, cb) {
         checkPermissions(caller, 'dialer', 'u', function (err) {
             if (err)
@@ -121,6 +151,38 @@ let Service = {
             return db.update(option.id, domain, option.data, cb);
 
         });
+    },
+
+    members: {
+        list: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'r', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options."));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, "Bad request dialer is required."));
+
+                let domain = validateCallerParameters(caller, option['domain']);
+
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                // TODO  before select dialer
+                option.domain = null;
+
+                if (!option.filter)
+                    option.filter = {};
+
+                option.filter["dialer"] = option.dialer;
+
+                let db = application.DB._query.dialer;
+                return db.memberList(option, cb);
+            });
+        }
     }
 };
 
