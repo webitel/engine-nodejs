@@ -20,6 +20,11 @@ function addRoutes (api) {
     api.delete('/api/v2/dialer/:id', remove);
 
     api.get('/api/v2/dialer/:dialer/members', listMembers);
+    api.get('/api/v2/dialer/:dialer/members/count', countMembers);
+    api.post('/api/v2/dialer/:dialer/members', createMember);
+    api.get('/api/v2/dialer/:dialer/members/:id', itemMember);
+    api.delete('/api/v2/dialer/:dialer/members/:id', removeMember);
+    api.put('/api/v2/dialer/:dialer/members/:id', updateMember);
 };
 
 function list (req, res, next) {
@@ -135,6 +140,19 @@ function listMembers (req, res, next) {
             options.sort[_s[0]] = parseInt(_s[1]);
     };
 
+    // TODO
+    if (req.query.filter) {
+        let _s = req.query.filter.split(',');
+        _s.forEach( (item) => {
+            let _f = item.split('=');
+            if (_f.length == 2) {
+                if (/^\^/.test(_f[1]))
+                    options.filter[_f[0]] = {$regex: _f[1]};
+                else options.filter[_f[0]] = isNaN(parseInt(_f[1])) ?_f[1] : parseInt(_f[1]);
+            }
+        });
+    };
+
     dialerService.members.list(req.webitelUser, options, (err, result) => {
         if (err)
             return next(err);
@@ -144,4 +162,110 @@ function listMembers (req, res, next) {
             "data": result
         });
     })
+};
+
+
+
+function countMembers (req, res, next) {
+    let options = {
+        dialer: req.params.dialer,
+        domain: req.query.domain,
+        filter: {}
+    };
+
+    // TODO
+    if (req.query.filter) {
+        let _s = req.query.filter.split(',');
+        _s.forEach( (item) => {
+            let _f = item.split('=');
+            if (_f.length == 2) {
+                if (/^\^/.test(_f[1]))
+                    options.filter[_f[0]] = {$regex: _f[1]};
+                else options.filter[_f[0]] = isNaN(parseInt(_f[1])) ?_f[1] : parseInt(_f[1]);
+            }
+        });
+    };
+
+    dialerService.members.count(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    })
+};
+
+function itemMember (req, res, next) {
+    let options = {
+        dialer: req.params.dialer,
+        id: req.params.id,
+        domain: req.query.domain
+    };
+
+    dialerService.members.item(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    })
+};
+
+function updateMember (req, res, next) {
+    let options = {
+        id: req.params.id,
+        dialer: req.params.dialer,
+        domain: req.query.domain,
+        data: req.body
+    };
+
+    dialerService.members.update(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    });
+};
+
+function removeMember (req, res, next) {
+    let options = {
+        id: req.params.id,
+        dialer: req.params.dialer,
+        domain: req.query.domain
+    };
+
+    dialerService.members.remove(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    });
+};
+
+function createMember (req, res, next) {
+    let options = {
+        dialer: req.params.dialer,
+        domain: req.query.domain,
+        data: req.body
+    };
+
+    dialerService.members.create(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    });
 };

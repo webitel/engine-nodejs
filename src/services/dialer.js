@@ -182,6 +182,151 @@ let Service = {
                 let db = application.DB._query.dialer;
                 return db.memberList(option, cb);
             });
+        },
+
+        count: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'r', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options."));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, "Bad request dialer is required."));
+
+                let domain = validateCallerParameters(caller, option['domain']);
+
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                // TODO  before select dialer
+                option.domain = null;
+
+                if (!option.filter)
+                    option.filter = {};
+
+                option.filter["dialer"] = option.dialer;
+
+                let db = application.DB._query.dialer;
+                return db.memberCount(option, cb);
+            });
+        },
+        
+        item: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'r', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options."));
+
+                if (!option.id)
+                    return cb(new CodeError(400, "Bad request id is required."));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, "Bad request dialer is required."));
+
+                let domain = validateCallerParameters(caller, option['domain']);
+
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                // TODO  before select dialer
+                option.domain = null;
+
+                let db = application.DB._query.dialer;
+                return db.memberById(option.id, option.dialer, cb);
+            });
+        },
+        
+        create: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'c', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options"));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, 'Bad request: dialer id is required.'));
+
+                if (!option.data)
+                    return cb(new CodeError(400, 'Bad request: data is required.'));
+
+                // TODO check dialer in domain
+                let domain = validateCallerParameters(caller, option['domain']);
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                let member = option.data;
+                member.dialer = option.dialer;
+
+                let db = application.DB._query.dialer;
+                return db.createMember(member, cb);
+
+            });
+        },
+
+        update: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'u', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options"));
+
+
+                if (!option.id)
+                    return cb(new CodeError(400, 'Bad request: id is required.'));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, 'Bad request: dialer id is required.'));
+
+                if (!option.data)
+                    return cb(new CodeError(400, 'Bad request: data is required.'));
+
+                // TODO check dialer in domain
+                let domain = validateCallerParameters(caller, option['domain']);
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                let db = application.DB._query.dialer;
+                return db.updateMember(option.id, option.dialer, option.data, cb);
+
+            });
+        },
+
+        remove: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'd', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options"));
+
+
+                if (!option.id)
+                    return cb(new CodeError(400, 'Bad request: id is required.'));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, 'Bad request: dialer id is required.'));
+
+
+                // TODO check dialer in domain
+                let domain = validateCallerParameters(caller, option['domain']);
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                let db = application.DB._query.dialer;
+                return db.removeMemberById(option.id, option.dialer, cb);
+
+            });
         }
     }
 };

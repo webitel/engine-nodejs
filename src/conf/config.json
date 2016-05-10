@@ -31,7 +31,8 @@
         "collectionLocation": "location",
         "collectionAclPermissions": "aclPermissions",
         "collectionHook": "hook",
-        "collectionDialer": "dialer"
+        "collectionDialer": "dialer",
+        "collectionDialerMembers": "agentStatusEngine"
     },
     "freeSWITCH": {
         "host": "pre.webitel.com",

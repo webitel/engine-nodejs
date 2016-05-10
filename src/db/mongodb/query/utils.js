@@ -69,5 +69,29 @@ let Utils = module.exports = {
         } catch (e) {
             cb(e);
         }
+    },
+
+    countInCollection: function (db, collectionName, options, cb) {
+        let filter = options['filter'],
+            domain = options.domain;
+
+        let query = Utils.buildFilterQuery(filter);
+
+        if (domain) {
+            query['$and'].push({
+                "domain": domain
+            });
+        }
+        try {
+
+            db
+                .collection(collectionName)
+                .find(query['$and'].length == 0 ? {} : query)
+                .count(cb);
+
+            return 1;
+        } catch (e) {
+            cb(e);
+        }
     }
 };
