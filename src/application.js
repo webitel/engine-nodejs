@@ -16,8 +16,8 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     plainTableToJSONArray = require('./utils/parse').plainTableToJSONArray,
     Broker = require('./lib/broker/index'),
     Hooks = require('./services/hook/hookClass'),
-    checkEslError = require('./middleware/checkEslError')
-    //outQueryService = require('./services/outboundQueue')
+    checkEslError = require('./middleware/checkEslError'),
+    AutoDialer = require('./services/autodialer')
     ;
 
 class Application extends EventEmitter2 {
@@ -55,6 +55,8 @@ class Application extends EventEmitter2 {
         scope.once('sys::connectDb', function (db) {
             //TODO bug!! account event prior connectToEsl
             scope.DB = db;
+            // TODO dialer init
+            new AutoDialer(scope);
             scope.initAcl();
             scope.connectToEsl();
             scope.attachProcess();

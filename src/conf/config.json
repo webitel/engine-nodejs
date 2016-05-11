@@ -80,7 +80,7 @@
         }
     },
     "conference": {
-        "enable": true,
+        "enable": false,
         "domain": "meeting",
         "validateMail": false,
         "validateUri": "https://webitel.com/",

@@ -12,14 +12,16 @@ function getLogger(module) {
             debug: 1,
             warn: 2,
             error: 3,
-            info: 4
+            info: 4,
+            dialer: 5
         },
         colors: {
             trace: 'yellow',
             debug: 'yellow',
             info: 'green',
             warn: 'yellow',
-            error: 'red'
+            error: 'red',
+            dialer: 'red'
         }
     };
     winston.addColors(logLevels.colors);
