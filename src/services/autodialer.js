@@ -65,22 +65,55 @@ class Dialer extends EventEmitter2 {
         this.name = config.name;
         this._limit = 0;
         this._maxTryCount = 5;
-        this._intervalTryCount = 60;
+        this._intervalTryCount = 5;
+        this._timerId = null;
 
         if (config.parameters instanceof Object) {
             this._limit = config.parameters.limit || 0;
             this._maxTryCount = config.parameters.maxTryCount || 5;
-            this._intervalTryCount = config.parameters.intervalTryCount || 60;
+            this._intervalTryCount = config.parameters.intervalTryCount || 5;
         };
 
         this.type = config.type;
 
+        log.debug(`
+            Init dialer: ${this.name}
+            Config:
+                limit: ${this._limit},
+                maxTryCount: ${this._maxTryCount},
+                intervalTryCount: ${this._intervalTryCount}
+        `);
+        
+        this.findMaxTryTime = function (cb) {
+            dbCollection.aggregate([
+                {$match: {"dialer": this._id}},
+                {
+                    $group: {
+                        _id: '',
+                        nextTry: {
+                            $min: "$_nextTryTime"
+                        }
+                    }
+                }
+            ], (err, res) => {
+                if (err)
+                    return cb(err);
+                return cb(null, res && res[0] && res[0].nextTry);
+            })
+        };
+
         this._typesReserve = {
             'progressive': function (cb) {
                 dbCollection.findOneAndUpdate(
-                    {dialer: this._id, _endCause: null, _lock: null, 'communications.state': 0},
+                    {
+                        dialer: this._id,
+                        _endCause: null,
+                        _lock: null,
+                        'communications.state': 0,
+                        $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
+                    },
                     {$set: {_lock: this._id}},
-                    {sort: [["priority", -1]]},
+                    {sort: [["_nextTryTime", -1],["priority", -1]]},
                     cb
                 )
             }.bind(this)
@@ -98,21 +131,23 @@ class Dialer extends EventEmitter2 {
             log.trace(`Members length ${this.members.length()}`);
 
             member.on('end', (m) => {
-                dbCollection.updateOne(
+                dbCollection.findOneAndUpdate(
                     {_id: m._id},
-                    {$push: {_log: m._log}, $set: {_lastSession: m.sessionId, _endCause: m.endCause}, $unset: {_lock: 1}, $inc: {_probeCount: 1}},
+                    {
+                      //  $push: {_log: m._log},
+                        $set: {_nextTryTime: m.nextTime, _lastSession: m.sessionId, _endCause: m.endCause},
+                        $unset: {_lock: 1}, $inc: {_probeCount: 1}
+                    },
                     (err, res) => {
                         if (err)
                             throw err;
-                        if (res.modifiedCount != 1 || res.matchedCount != 1)
-                            throw res;
 
                         log.trace(`removed ${m.sessionId}`);
                         if (!this.members.remove(m._id))
                             throw 'asd'
                 });
             });
-            member.run(this._maxTryCount);
+            member.run(this._maxTryCount, this._intervalTryCount);
         });
 
         this.members.on('removed', () => {
@@ -126,33 +161,46 @@ class Dialer extends EventEmitter2 {
     };
 
     getNextMember () {
-        log.trace(`find members in ${this.name}`);
+        log.trace(`find members in ${this.name} - members queue: ${this.members.length()}`);
         //if (this.members.length() > this._limit) {
         //    log.trace(`Skip find member from dialer ${this.name}, reason: max limit`);
         //    return;
         //};
-        for (let i = 1, len = (this._limit - this.members.length()); i <= len; i++)
-            this._typesReserve[this.type]( (err, res) => {
-                if (err)
-                    return log.error(err);
 
+        if (this._limit === this.members.length())
+            return;
 
-                if (!res || !res.value) {
-                    // End members;
-                    return log.debug (`End members in ${this.name}`)
-                };
+        this._typesReserve[this.type]( (err, res) => {
+            if (err)
+                return log.error(err);
 
-                if (this.members.existsKey(res.value._id))
-                    return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
+            if (!res || !res.value) {
+                // End members;
+                this.tryStop();
+                return log.debug (`End members in ${this.name}`);
+            };
+            this.getNextMember();
 
-                let m = new Member(res.value);
-                this.members.add(m._id, m);
-            });
+            if (this.members.existsKey(res.value._id))
+                return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
 
+            let m = new Member(res.value);
+            this.members.add(m._id, m);
+        });
 
     }
 
-    stop () {}
+    tryStop () {
+        if (this._timerId)
+            clearTimeout(this._timerId);
+        this.findMaxTryTime((err, res) => {
+            if (err)
+                return log.error(err);
+
+
+        });
+        this._timerId = setTimeout(() => this.getNextMember(), 1000);
+    }
 
 
 };
@@ -187,6 +235,7 @@ class Member extends EventEmitter2 {
         };
         this.currentProbe = (config._probeCount || 0) + 1;
         this.endCause = null;
+
         this.score = 0;
 
         this._data = config;
@@ -223,17 +272,20 @@ class Member extends EventEmitter2 {
 
         if (!this.endCause && this.currentProbe >= this.tryCount) {
             this.endCause = END_CAUSE.MAX_TRY
+        } else {
+            this.nextTime = Date.now() + (this.nextTrySec * 1000);
         }
         this.log(`end session`);
         this.emit('end', this);
     }
 
-    run (maxTryCount) {
+    run (maxTryCount, nextTrySec) {
         this.tryCount = maxTryCount || 0;
+        this.nextTrySec = nextTrySec || 60;
         let scope = this;
         this.log(`run`);
         setTimeout(() => {
             scope.end()
-        }, 0)
+        }, 5)
     }
 }
