@@ -15,6 +15,14 @@ const END_CAUSE = {
     ACCEPT: "ACCEPT"
 };
 
+const CODE_RESPONSE_GATEWAY_ERRORS = [];
+const CODE_RESPONSE_MEMBER_ERRORS = [];
+const CODE_RESPONSE_MEMBER_OK = [];
+
+const MAX_MEMBER_RETRY = 999;
+
+
+
 module.exports =  class AutoDialer extends EventEmitter2 {
     constructor (app) {
         super();
@@ -55,21 +63,71 @@ module.exports =  class AutoDialer extends EventEmitter2 {
 //          чи на всы номери одночасно чи по прыоритету...
    З операторами просто слдкувати щоб було >> 1 вльного щоб запускати орджнейт
 */
+function dynamicSort(property) {
+    var sortOrder = 1;
+    if(property[0] === "-") {
+        sortOrder = -1;
+        property = property.substr(1);
+    }
+    return function (a,b) {
+        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
+        return result * sortOrder;
+    }
+}
 
-class Dialer extends EventEmitter2 {
+class Router extends EventEmitter2 {
+
+    _setResource (resources) {
+        this._resourcePaterns = [];
+        if (resources instanceof Array)
+            resources.forEach((resource) => {
+                try {
+                    if (typeof resource.dialedNumber != 'string' || !(resource.destinations instanceof Array))
+                        return;
+                    let flags = resource.dialedNumber.match(new RegExp('^/(.*?)/([gimy]*)$'));
+                    if (!flags)
+                        flags = [null, resource.dialedNumber];
+
+                    let regex = new RegExp(flags[1], flags[2]);
+                    let gws = resource.destinations.sort(dynamicSort('order'));
+
+                    gws.map( (i) => {
+                        return {
+                            dialString: i.g
+                        }
+                    })
+
+                    this._resourcePaterns.push(
+                        {
+                            regexp: regex,
+                            gws: gws
+                        }
+                    )
+                } catch (e) {
+                    this.emit('error', e);
+                };
+            });
+
+    }
+}
+
+class Dialer extends Router {
     constructor (config, dbCollection) {
         super();
         // TODO string ????
         this._id = config._id.toString();
 
         this.name = config.name;
-        this._limit = 0;
+        this._limit = MAX_MEMBER_RETRY;
         this._maxTryCount = 5;
         this._intervalTryCount = 5;
         this._timerId = null;
+        this._resources = null;
+
+        this._setResource(config.resources);
 
         if (config.parameters instanceof Object) {
-            this._limit = config.parameters.limit || 0;
+            this._limit = config.parameters.limit || MAX_MEMBER_RETRY;
             this._maxTryCount = config.parameters.maxTryCount || 5;
             this._intervalTryCount = config.parameters.intervalTryCount || 5;
         };
@@ -113,7 +171,7 @@ class Dialer extends EventEmitter2 {
                         $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
                     },
                     {$set: {_lock: this._id}},
-                    {sort: [["_nextTryTime", -1],["priority", -1]]},
+                    {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
                     cb
                 )
             }.bind(this)
@@ -167,7 +225,7 @@ class Dialer extends EventEmitter2 {
         //    return;
         //};
 
-        if (this._limit === this.members.length())
+        if (this._limit <= this.members.length() + 1)
             return;
 
         this._typesReserve[this.type]( (err, res) => {
@@ -193,13 +251,16 @@ class Dialer extends EventEmitter2 {
     tryStop () {
         if (this._timerId)
             clearTimeout(this._timerId);
+
         this.findMaxTryTime((err, res) => {
             if (err)
                 return log.error(err);
 
-
+            if (!res)
+                return log.info(`STOP DIALER ${this.name}`);
+            console.log(res - Date.now());
+            this._timerId = setTimeout(() => this.getNextMember(), res - Date.now());
         });
-        this._timerId = setTimeout(() => this.getNextMember(), 1000);
     }
 
 
@@ -280,12 +341,12 @@ class Member extends EventEmitter2 {
     }
 
     run (maxTryCount, nextTrySec) {
-        this.tryCount = maxTryCount || 0;
-        this.nextTrySec = nextTrySec || 60;
+        this.tryCount = maxTryCount;
+        this.nextTrySec = nextTrySec;
         let scope = this;
         this.log(`run`);
         setTimeout(() => {
             scope.end()
-        }, 5)
+        }, 100)
     }
 }
