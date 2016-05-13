@@ -56,7 +56,6 @@ class Application extends EventEmitter2 {
             //TODO bug!! account event prior connectToEsl
             scope.DB = db;
             // TODO dialer init
-            new AutoDialer(scope);
             scope.initAcl();
             scope.connectToEsl();
             scope.attachProcess();
@@ -101,6 +100,7 @@ class Application extends EventEmitter2 {
                 scope.emit('sys::eslConnect');
 
                 //TODO
+                new AutoDialer(scope);
                 log.info('Load tiers');
                 this.bgapi('callcenter_config tier list', function (res) {
                     let body = res && res['body'];

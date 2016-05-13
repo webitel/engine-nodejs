@@ -11,11 +11,12 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     Collection = require(__appRoot + '/lib/collection');
 
 const END_CAUSE = {
+    NO_ROUTE: "NO_ROUTE",
     MAX_TRY: "MAX_TRY_COUNT",
     ACCEPT: "ACCEPT"
 };
 
-const CODE_RESPONSE_GATEWAY_ERRORS = [];
+const CODE_RESPONSE_GATEWAY_ERRORS = ["NORMAL_TEMPORARY_FAILURE"];
 const CODE_RESPONSE_MEMBER_ERRORS = [];
 const CODE_RESPONSE_MEMBER_OK = [];
 
@@ -75,11 +76,73 @@ function dynamicSort(property) {
     }
 }
 
+class Gw {
+    constructor (conf, regex, variables) {
+        this.activeLine = 0;
+        // TODO link regex...
+        this.regex = regex;
+        this.maxLines = conf.limit || 0;
+        this.gwName = conf.gwName;
+
+        if (variables) {
+            let arr = [];
+            for (let key in variables)
+                arr.push(`${key}=${variables[key]}`);
+
+            this._vars = arr;
+        }
+
+        this.dialString = conf.gwProto == 'sip' && conf.gwName ? `sofia/gateway/${conf.gwName}/${conf.dialString}` : conf.dialString;
+    }
+
+    // TODO type predictive
+    tryLock (operator, member, predictive) {
+        if (this.activeLine >= this.maxLines || !member.number)
+            return false;
+
+        this.activeLine++;
+        let gwString = member.number.replace(this.regex, this.dialString);
+
+        let vars = [].concat(this._vars);
+
+        if (!member.getVariable('origination_caller_id_number')) {
+            console.log(member.name, member.number)
+            member.setVariable('origination_caller_id_number', member.number);
+            member.setVariable('origination_caller_id_name', member.name);
+        }
+
+        for (let key of member.getVariableKeys()) {
+            vars.push(`${key}=${member.getVariable(key)}`);
+        }
+
+        if (operator && predictive)
+            return `originate {${vars}}${gwString} $park()`;
+
+        if (operator && !predictive)
+            return `originate {${vars}}user/${operator} $bridge(${gwString})`;
+
+
+        return `originate {${vars}}${gwString} ` + '&socket($${acr_srv})';
+    }
+
+    unLock () {
+        let unLocked = false;
+        if (this.activeLine === this.maxLines && this.maxLines !== 0)
+            unLocked = true;
+        this.activeLine--;
+        return unLocked;
+    }
+}
+
 class Router extends EventEmitter2 {
 
     _setResource (resources) {
         this._resourcePaterns = [];
-        if (resources instanceof Array)
+        this._lockedGateways = [];
+
+        if (resources instanceof Array) {
+
+            var maxLimitGw = 0;
             resources.forEach((resource) => {
                 try {
                     if (typeof resource.dialedNumber != 'string' || !(resource.destinations instanceof Array))
@@ -89,13 +152,21 @@ class Router extends EventEmitter2 {
                         flags = [null, resource.dialedNumber];
 
                     let regex = new RegExp(flags[1], flags[2]);
-                    let gws = resource.destinations.sort(dynamicSort('order'));
+                    let gws = [];
 
-                    gws.map( (i) => {
-                        return {
-                            dialString: i.g
-                        }
-                    })
+                    resource.destinations.forEach( (i) => {
+                        if (i.enabled !== true)
+                            return;
+
+                        if (maxLimitGw !== -1)
+                            if (i.limit === 0) {
+                                maxLimitGw = -1;
+                            } else {
+                                maxLimitGw += i.limit
+                            }
+
+                        gws.push(new Gw(i, regex, this._variables));
+                    });
 
                     this._resourcePaterns.push(
                         {
@@ -105,9 +176,90 @@ class Router extends EventEmitter2 {
                     )
                 } catch (e) {
                     this.emit('error', e);
-                };
+                }
+                ;
             });
 
+            if (maxLimitGw !== -1 && this._limit > maxLimitGw)
+                this._limit = maxLimitGw
+
+
+        }
+    }
+
+    getDialStringFromMember (operator, member) {
+        let res = {
+            found: false,
+            dialString: false,
+            cause: null,
+            patternIndex: null,
+            gw: null
+        };
+        for (let i = 0, len = this._resourcePaterns.length; i < len; i++) {
+            if (this._resourcePaterns[i].regexp.test(member.number)) {
+                res.found = true;
+                for (let j = 0, lenGws = this._resourcePaterns[i].gws.length; j < lenGws; j++) {
+                    let gatewayPositionMap = i + '>' + j;
+                    member.setVariable('gatewayPositionMap', gatewayPositionMap);
+                    if (~this._lockedGateways.indexOf(gatewayPositionMap))
+                        continue;
+
+                    res.dialString = this._resourcePaterns[i].gws[j].tryLock(operator, member);
+                    if (res.dialString) {
+                        res.patternIndex = i;
+                        res.gw = i;
+                        break
+                    } else {
+                        this._lockedGateways.push(gatewayPositionMap)
+                    }
+                }
+            }
+        }
+        if (!res.found)
+            res.cause = END_CAUSE.NO_ROUTE;
+
+        return res;
+    }
+
+    freeGateway (gw) {
+        let gateway = this._resourcePaterns[gw.patternIndex].gws[gw.gw],
+            gatewayPositionMap = gw.patternIndex + '>' + gw.gw;
+
+        if (gateway.unLock() && ~this._lockedGateways.indexOf(gatewayPositionMap))
+            this._lockedGateways.splice(this._lockedGateways.indexOf(gatewayPositionMap), 1)
+
+    }
+
+    dialMember (member) {
+        log.trace(`try call ${member.sessionId}`);
+        let gw = this.getDialStringFromMember('102@10.10.10.144', member);
+        member.log(gw.dialString);
+        if (gw.found) {
+            if (gw.dialString) {
+                log.trace(`Call ${gw.dialString}`);
+                application.Esl.bgapi(gw.dialString, (res) => {
+
+                    this.freeGateway(gw);
+
+                    if (/^-ERR/.test(res.body)) {
+                        let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
+                        member.log(error);
+                        member.end(error);
+                    } else {
+
+                        member.end();
+                    }
+                });
+            } else {
+                // MEGA TODO
+                member.currentProbe--;
+                this.nextTrySec = 0.5;
+                member.end();
+            }
+
+        } else {
+            member.end(gw.cause);
+        }
     }
 }
 
@@ -124,13 +276,15 @@ class Dialer extends Router {
         this._timerId = null;
         this._resources = null;
 
-        this._setResource(config.resources);
-
         if (config.parameters instanceof Object) {
             this._limit = config.parameters.limit || MAX_MEMBER_RETRY;
             this._maxTryCount = config.parameters.maxTryCount || 5;
             this._intervalTryCount = config.parameters.intervalTryCount || 5;
         };
+
+        this._variables =config.variables;
+
+        this._setResource(config.resources);
 
         this.type = config.type;
 
@@ -144,7 +298,7 @@ class Dialer extends Router {
         
         this.findMaxTryTime = function (cb) {
             dbCollection.aggregate([
-                {$match: {"dialer": this._id}},
+                {$match: {"dialer": this._id, "_endCause": null}},
                 {
                     $group: {
                         _id: '',
@@ -162,14 +316,20 @@ class Dialer extends Router {
 
         this._typesReserve = {
             'progressive': function (cb) {
+                let filter = {
+                    dialer: this._id,
+                    _endCause: null,
+                    _lock: null,
+                    'communications.state': 0,
+                    $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
+                }
+
+                if (this._lockedGateways.length > 0)
+                    filter['variables.gatewayPositionMap'] = {
+                        $nin: this._lockedGateways
+                    };
                 dbCollection.findOneAndUpdate(
-                    {
-                        dialer: this._id,
-                        _endCause: null,
-                        _lock: null,
-                        'communications.state': 0,
-                        $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
-                    },
+                    filter,
                     {$set: {_lock: this._id}},
                     {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
                     cb
@@ -188,12 +348,12 @@ class Dialer extends Router {
         this.members.on('added', (member) => {
             log.trace(`Members length ${this.members.length()}`);
 
-            member.on('end', (m) => {
+            member.once('end', (m) => {
                 dbCollection.findOneAndUpdate(
                     {_id: m._id},
                     {
-                      //  $push: {_log: m._log},
-                        $set: {_nextTryTime: m.nextTime, _lastSession: m.sessionId, _endCause: m.endCause},
+                        $push: {_log: m._log},
+                        $set: {_nextTryTime: m.nextTime, _lastSession: m.sessionId, _endCause: m.endCause, variables: m.variables},
                         $unset: {_lock: 1}, $inc: {_probeCount: 1}
                     },
                     (err, res) => {
@@ -205,7 +365,8 @@ class Dialer extends Router {
                             throw 'asd'
                 });
             });
-            member.run(this._maxTryCount, this._intervalTryCount);
+
+            this.dialMember(member);
         });
 
         this.members.on('removed', () => {
@@ -213,6 +374,8 @@ class Dialer extends Router {
         });
 
         this.getNextMember();
+
+
 
         ;
         //
@@ -242,7 +405,7 @@ class Dialer extends Router {
             if (this.members.existsKey(res.value._id))
                 return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
 
-            let m = new Member(res.value);
+            let m = new Member(res.value, this._maxTryCount, this._intervalTryCount);
             this.members.add(m._id, m);
         });
 
@@ -258,8 +421,12 @@ class Dialer extends Router {
 
             if (!res)
                 return log.info(`STOP DIALER ${this.name}`);
-            console.log(res - Date.now());
-            this._timerId = setTimeout(() => this.getNextMember(), res - Date.now());
+
+            let nextTime = res - Date.now();
+            if (nextTime < 1)
+                nextTime = 1000;
+            console.log(nextTime);
+            this._timerId = setTimeout(() => this.getNextMember(), nextTime);
         });
     }
 
@@ -282,10 +449,13 @@ const MemberState = {
 };
 
 class Member extends EventEmitter2 {
-    constructor (config) {
+    constructor (config, maxTryCount, nextTrySec) {
         super();
         if (config._lock)
             throw config;
+
+        this.tryCount = maxTryCount;
+        this.nextTrySec = nextTrySec;
 
         this._id = config._id;
 
@@ -298,26 +468,41 @@ class Member extends EventEmitter2 {
         this.endCause = null;
 
         this.score = 0;
+        this.variables = {};
 
         this._data = config;
         this.name = config.name || "";
-        this.dialString = '{';
-        for (var key in config.variables) {
-            this.dialString += `${key}=${config.variables[key]},`
+
+
+        for (let key in config.variables) {
+            this.setVariable(key, config.variables[key]);
         };
 
         this.log(`Create member ${config._id} -> ${this.sessionId}`);
 
-        this.dialString += '}';
-
         this.number = "";
+        this.numberPosition = null;
         if (config.communications instanceof Array) {
-            let n = [];
-            for (var i = 0, len = config.communications.length; i < len; i++)
-                if (config.communications[i].state === MemberState.Idle)
-                    n.push(config.communications[i]);
+            for (let i = 0, len = config.communications.length; i < len; i++)
+                if (config.communications[i].state === MemberState.Idle) {
+                    this.numberPosition = i;
+                    this.number = config.communications[i].number;
+                    break;
+                }
+        }
+    }
 
-        };
+    setVariable (varName, value) {
+        this.variables[varName] = value;
+        return true
+    }
+
+    getVariable (varName) {
+        return this.variables[varName] ;
+    }
+
+    getVariableKeys () {
+        return Object.keys(this.variables);
     }
 
     log (str) {
@@ -328,8 +513,10 @@ class Member extends EventEmitter2 {
         });
     }
 
-    end () {
+    end (endCause) {
         log.trace(`end member ${this._id}`) ;
+        if (endCause)
+            this.endCause = endCause;
 
         if (!this.endCause && this.currentProbe >= this.tryCount) {
             this.endCause = END_CAUSE.MAX_TRY
@@ -341,8 +528,7 @@ class Member extends EventEmitter2 {
     }
 
     run (maxTryCount, nextTrySec) {
-        this.tryCount = maxTryCount;
-        this.nextTrySec = nextTrySec;
+
         let scope = this;
         this.log(`run`);
         setTimeout(() => {
