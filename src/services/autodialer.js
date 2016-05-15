@@ -16,9 +16,9 @@ const END_CAUSE = {
     ACCEPT: "ACCEPT"
 };
 
-const CODE_RESPONSE_ERRORS = ["NORMAL_TEMPORARY_FAILURE", END_CAUSE.NO_ROUTE, 'CHAN_NOT_IMPLEMENTED'];
-const CODE_RESPONSE_RETRY = [];
-const CODE_RESPONSE_OK = [];
+const CODE_RESPONSE_ERRORS = ["NORMAL_TEMPORARY_FAILURE", END_CAUSE.NO_ROUTE, 'CHAN_NOT_IMPLEMENTED', "CALL_REJECTED", "INVALID_NUMBER_FORMAT", "NETWORK_OUT_OF_ORDER", "NORMAL_TEMPORARY_FAILURE", "OUTGOING_CALL_BARRED", "SERVICE_UNAVAILABLE", "CHAN_NOT_IMPLEMENTED", "SERVICE_NOT_IMPLEMENTED", "INCOMPATIBLE_DESTINATION", "MANDATORY_IE_MISSING", "PROGRESS_TIMEOUT", "GATEWAY_DOWN"];
+const CODE_RESPONSE_RETRY = ["UNALLOCATED_NUMBER", "NO_ROUTE_DESTINATION", "USER_BUSY", "NO_USER_RESPONSE", "NO_ANSWER", "SUBSCRIBER_ABSENT", "NUMBER_CHANGED", "NORMAL_UNSPECIFIED", "NORMAL_CIRCUIT_CONGESTION", "ORIGINATOR_CANCEL", "LOSE_RACE", "USER_NOT_REGISTERED"];
+const CODE_RESPONSE_OK = ["NORMAL_CLEARING"];
 
 const MAX_MEMBER_RETRY = 999;
 
@@ -113,7 +113,7 @@ class Gw {
         }
 
         for (let key of member.getVariableKeys()) {
-            vars.push(`${key}=${member.getVariable(key)}`);
+            vars.push(`${key}='${member.getVariable(key)}'`);
         }
 
         if (operator && predictive)
@@ -123,7 +123,7 @@ class Gw {
             return `originate {${vars}}user/${operator} $bridge(${gwString})`;
 
 
-        return `originate {${vars}}${gwString} ` + '&socket($${acr_srv})';
+        return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
     }
 
     unLock () {
@@ -234,33 +234,6 @@ class Router extends EventEmitter2 {
             this._lockedGateways.splice(this._lockedGateways.indexOf(gatewayPositionMap), 1)
 
     }
-
-    //dialMember (member) {
-    //    log.trace(`try call ${member.sessionId}`);
-    //    let gw = this.getDialStringFromMember(null, member);
-    //
-    //    member.log(`dialString: ${gw.dialString}`);
-    //    if (gw.found) {
-    //        if (gw.dialString) {
-    //
-    //            log.trace(`Call ${gw.dialString}`);
-    //            application.Esl.bgapi(gw.dialString, (res) => {
-    //
-    //                this.freeGateway(gw);
-    //                this._responseCallMiddleware(res, member);
-    //
-    //            });
-    //        } else {
-    //            // MEGA TODO
-    //            member.minusProbe();
-    //            this.nextTrySec = 0.5;
-    //            member.end();
-    //        }
-    //
-    //    } else {
-    //        member.end(gw.cause);
-    //    }
-    //}
 }
 
 class Dialer extends Router {
@@ -275,6 +248,8 @@ class Dialer extends Router {
         this._intervalTryCount = 5;
         this._timerId = null;
         this._resources = null;
+
+        this._countRequestHunting = 0;
 
         if (config.parameters instanceof Object) {
             this._limit = config.parameters.limit || MAX_MEMBER_RETRY;
@@ -302,19 +277,22 @@ class Dialer extends Router {
             //}
             dbCollection.aggregate([
                 //{$match: {"dialer": this._id,  "_endCause": null}},
-                {$match: {"dialer": this._id,  "communications.state": 0}},
+                {$match: {"dialer": this._id, "_endCause": null, "communications.state": 0}},
                 {
                     $group: {
                         _id: '',
-                        nextTry: {
+                        nextTryTime: {
                             $min: "$_nextTryTime"
+                        },
+                        count: {
+                            $sum: 1
                         }
                     }
                 }
             ], (err, res) => {
                 if (err)
                     return cb(err);
-                return cb(null, res && res[0] && res[0].nextTry);
+                return cb(null, res && res[0]);
             })
         };
 
@@ -327,22 +305,35 @@ class Dialer extends Router {
                     }
                 };
                 if (this._lockedGateways.length > 0)
-                    communications.$elemMatch.gw = {
+                    communications.$elemMatch.gatewayPositionMap = {
                         $nin: this._lockedGateways
                     };
 
                 let filter = {
                     dialer: this._id,
-                    //_endCause: null,
+                    _endCause: null,
                     _lock: null,
                     communications,
                     $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
                 };
-                
+                let i = {
+                    _nextTryTime: -1,
+                    priority: -1,
+                    _id: -1,
+                    dialer: 1,
+                    _endCause: 1,
+                    _lock: 1,
+                    "communications.state": 1,
+                    "communications.gatewayPositionMap": 1
+                };
+
+                console.log(filter);
+
                 dbCollection.findOneAndUpdate(
                     filter,
                     {$set: {_lock: this._id}},
-                    {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
+                    {sort: {_nextTryTime: 1, priority: -1, _id: -1}},
+                    //{sort: [["_nextTryTime", 1],["priority", -1], ["_id", -1]]},
                     cb
                 )
             }.bind(this)
@@ -366,25 +357,33 @@ class Dialer extends Router {
                 if (gw.found) {
                     if (gw.dialString) {
 
-                        application.Esl.once(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, (e) => {
+                        let onChannelHangup = function (e) {
                             member.end(e.getHeader('variable_hangup_cause'));
-                        });
+                        };
+                        
+                        let off = function () {
+                            application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
+                        };
+
+                        application.Esl.once(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
 
                         log.trace(`Call ${gw.dialString}`);
 
                         application.Esl.bgapi(gw.dialString, (res) => {
 
                             this.freeGateway(gw);
-                            console.log(res.body);
+
                             if (/^-ERR/.test(res.body)) {
+                                off();
                                 let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                                 member.end(error);
-                            };
+                            }
+
                         });
                     } else {
                         // MEGA TODO
                         member.minusProbe();
-                        this.nextTrySec = 0.5;
+                        this.nextTrySec = 0;
                         member.end();
                     }
 
@@ -410,7 +409,7 @@ class Dialer extends Router {
 
             member.once('end', (m) => {
 
-                let $set = {_nextTryTime: m.nextTime, _lastSession: m.sessionId, _endCause: m.endCause, variables: m.variables};
+                let $set = {_nextTryTime: m.nextTime, _lastSession: m.sessionId, _endCause: m.endCause, variables: m.variables, _probeCount: m.currentProbe};
                 if (m._currentNumber)
                     $set[`communications.${m._currentNumber._id}`] = m._currentNumber;
 
@@ -419,7 +418,7 @@ class Dialer extends Router {
                     {
                         $push: {_log: m._log},
                         $set,
-                        $unset: {_lock: 1}, $inc: {_probeCount: 1}
+                        $unset: {_lock: 1}//, $inc: {_probeCount: 1}
                     },
                     (err, res) => {
                         if (err)
@@ -432,36 +431,48 @@ class Dialer extends Router {
                 );
             });
 
+            if (!this.checkLimit())
+                this.getNextMember();
+
             this.dialMember(member);
         });
 
         this.members.on('removed', () => {
-            this.getNextMember();
+            if (!this.checkLimit())
+                this.getNextMember();
         });
 
         this.getNextMember();
     }
 
+    checkLimit () {
+        return this._countRequestHunting >= this._limit || this.members.length() + 1 >= this._limit
+    }
+
+
     getNextMember () {
         log.trace(`find members in ${this.name} - members queue: ${this.members.length()}`);
-        //if (this.members.length() > this._limit) {
-        //    log.trace(`Skip find member from dialer ${this.name}, reason: max limit`);
-        //    return;
-        //};
 
-        if (this._limit <= this.members.length() + 1)
+        console.log(this._countRequestHunting)
+        console.log(this._limit)
+        console.log(this._limit)
+
+        if (this.checkLimit())
             return;
 
+        this._countRequestHunting++;
         this._typesReserve[this.type]( (err, res) => {
+            this._countRequestHunting--;
             if (err)
                 return log.error(err);
 
             if (!res || !res.value) {
                 // End members;
-                this.tryStop();
-                return log.debug (`End members in ${this.name}`);
-            };
-            this.getNextMember();
+                if (!this.checkLimit())
+                    this.tryStop();
+                return log.debug (`Not found members in ${this.name}`);
+            }
+
 
             if (this.members.existsKey(res.value._id))
                 return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
@@ -473,8 +484,10 @@ class Dialer extends Router {
     }
 
     tryStop () {
-        if (this._timerId)
-            clearTimeout(this._timerId);
+        if (this._processTryStop || this.checkLimit())
+            return;
+        this._processTryStop = true;
+        console.log('Try END -------------');
 
         this.findMaxTryTime((err, res) => {
             if (err)
@@ -483,11 +496,23 @@ class Dialer extends Router {
             if (!res)
                 return log.info(`STOP DIALER ${this.name}`);
 
-            let nextTime = res - Date.now();
-            if (nextTime < 1)
-                nextTime = 1000;
-            console.log(nextTime);
-            this._timerId = setTimeout(() => this.getNextMember(), nextTime);
+            log.trace(`Status ${this.name} : ${res.count || 0}, nextTryTime: ${res.nextTryTime}`);
+
+            if (res.count === 0)
+                return log.info(`STOP DIALER ${this.name}`);
+
+            this._processTryStop = false;
+            if (res.nextTryTime > 0) {
+                let nextTime = res.nextTryTime - Date.now();
+                if (nextTime < 1)
+                    nextTime = 1000;
+                console.log(nextTime);
+                this._timerId = setTimeout(() => {
+                    clearTimeout(this._timerId);
+                    this.getNextMember()
+                }, nextTime);
+            }
+
         });
     }
 }
@@ -527,6 +552,8 @@ class Member extends EventEmitter2 {
         this.endCause = null;
 
         this.score = 0;
+
+        //this.bigData = new Array(1e5).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
         this.variables = {};
 
         this._data = config;
@@ -537,14 +564,20 @@ class Member extends EventEmitter2 {
             this.setVariable(key, config.variables[key]);
         };
 
-        this.log(`create`);
+        this.log(`create probe ${this.currentProbe}`);
 
         this.number = "";
         this._currentNumber = null;
+        this._countActiveNumbers = 0;
         if (config.communications instanceof Array) {
             let n = config.communications.filter( (communication, position) => {
                 // TODO remove lockedGws, add queue projection..
-                if (communication && communication.state === MemberState.Idle && (!lockedGws || !(communication.gatewayPositionMap in lockedGws))) {
+
+                let isOk = communication && communication.state === MemberState.Idle;
+                if (isOk)
+                    this._countActiveNumbers++;
+
+                if (isOk && (!lockedGws || !(communication.gatewayPositionMap in lockedGws))) {
                     if (!communication._probe)
                         communication._probe = 0;
                     if (!communication.priority)
@@ -574,19 +607,6 @@ class Member extends EventEmitter2 {
         this.log(`minus probe: ${this.currentProbe}`);
     }
 
-    _sortNumbers (a, b) {
-        var aPosition = a.position;
-        var bPosition = b.position;
-        var aProbe = a._probe;
-        var bProbe = b._probe;
-
-        if(aPosition == bPosition) {
-            return (aProbe < bProbe) ? -1 : (aProbe > bProbe) ? 1 : 0;
-        } else {
-            return (aPosition < bPosition) ? -1 : 1;
-        }
-    }
-
     setVariable (varName, value) {
         this.variables[varName] = value;
         return true
@@ -613,35 +633,52 @@ class Member extends EventEmitter2 {
             return;
         this._currentNumber.state = state;
     }
-    end (endCause) {
+    end (endCause, e) {
         if (this.processEnd) return;
         this.processEnd = true;
 
 
-        log.trace(`end member ${this._id} cause: ${endCause || ''}}`) ;
+        log.trace(`end member ${this._id} cause: ${this.endCause || endCause || ''}`) ;
+
+
+        if (~CODE_RESPONSE_OK.indexOf(endCause)) {
+            this.endCause = endCause;
+            this.log(`OK: ${endCause}`);
+            this._setStateCurrentNumber(MemberState.End);
+            this.emit('end', this);
+            return;
+        }
+
+        if (~CODE_RESPONSE_RETRY.indexOf(endCause)) {
+            if (this.currentProbe >= this.tryCount) {
+                this.log(`max try count`);
+                this.endCause = END_CAUSE.MAX_TRY;
+                this._setStateCurrentNumber(MemberState.End);
+            } else {
+                this.log(`Retry: ${endCause}`);
+                this._setStateCurrentNumber(MemberState.Idle);
+            }
+
+            this.emit('end', this);
+            return;
+        }
+
         if (~CODE_RESPONSE_ERRORS.indexOf(endCause)) {
             this.log(`fatal: ${endCause}`);
             this._setStateCurrentNumber(MemberState.End);
         }
 
 
-        if (!this.endCause && this.currentProbe >= this.tryCount) {
+        if (this.currentProbe >= this.tryCount) {
             this.log(`max try count`);
             this.endCause = endCause || END_CAUSE.MAX_TRY;
             this._setStateCurrentNumber(MemberState.End)
         } else {
+            if (this._countActiveNumbers == 1 && endCause)
+                this.endCause = endCause;
             this.nextTime = Date.now() + (this.nextTrySec * 1000);
         }
-        this.log(`end cause: ${endCause}`);
-        this.emit('end', this, endCause);
-    }
-
-    run (maxTryCount, nextTrySec) {
-
-        let scope = this;
-        this.log(`run`);
-        setTimeout(() => {
-            scope.end()
-        }, 100)
+        this.log(`end cause: ${endCause || ''}`);
+        this.emit('end', this);
     }
 }
