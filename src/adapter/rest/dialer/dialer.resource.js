@@ -17,6 +17,7 @@ function addRoutes (api) {
     api.post('/api/v2/dialer', create);
     api.get('/api/v2/dialer/:id', item);
     api.put('/api/v2/dialer/:id', update);
+    api.put('/api/v2/dialer/:id/state/:state', setState);
     api.delete('/api/v2/dialer/:id', remove);
 
     api.get('/api/v2/dialer/:dialer/members', listMembers);
@@ -92,6 +93,24 @@ function update (req, res, next) {
     };
 
     dialerService.update(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    });
+};
+
+function setState (req, res, next) {
+    let options = {
+        id: req.params.id,
+        state: +req.params.state,
+        domain: req.query.domain
+    };
+
+    dialerService.setState(req.webitelUser, options, (err, result) => {
         if (err)
             return next(err);
 

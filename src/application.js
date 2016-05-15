@@ -100,7 +100,8 @@ class Application extends EventEmitter2 {
                 scope.emit('sys::eslConnect');
 
                 //TODO
-                new AutoDialer(scope);
+                scope.AutoDialer = new AutoDialer(scope);
+
                 log.info('Load tiers');
                 this.bgapi('callcenter_config tier list', function (res) {
                     let body = res && res['body'];

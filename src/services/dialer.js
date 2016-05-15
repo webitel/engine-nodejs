@@ -36,6 +36,41 @@ let Service = {
         });
     },
 
+
+    setState: function (caller, option, cb) {
+        checkPermissions(caller, 'dialer', 'u', function (err) {
+            if (err)
+                return cb(err);
+
+            if (!option)
+                return cb(new CodeError(400, "Bad request options"));
+
+            if (!option.id)
+                return cb(new CodeError(400, "Bad request: id is required"));
+
+            let domain = validateCallerParameters(caller, option['domain']);
+            if (!domain) {
+                return cb(new CodeError(400, 'Bad request: domain is required.'));
+            }
+
+            if (typeof option.state !== 'number') {
+                return cb(new CodeError(400, 'Bad request: state is required.'));
+            }
+
+            option.domain = domain;
+            if (option.state == 1) {
+                return application.AutoDialer.runDialerById(option.id, domain, cb);
+            } else if (option.state == 0) {
+                return application.AutoDialer.stopDialerById(option.id, domain, cb);
+            }
+
+            //cb(null, {
+            //    activeCall: 20,
+            //    activeState: 2
+            //});
+        });
+    },
+
     /**
      *
      * @param caller

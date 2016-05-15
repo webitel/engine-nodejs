@@ -8,6 +8,7 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     log = require(__appRoot + '/lib/log')(module),
     async = require('async'),
     generateUuid = require('node-uuid'),
+    ObjectID = require('mongodb').ObjectID,
     Collection = require(__appRoot + '/lib/collection');
 
 const END_CAUSE = {
@@ -36,6 +37,32 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             dialer: app.DB.collection('dialer'),
             members: app.DB.collection('agentStatusEngine')
         };
+
+        this.activeDialer.on('added', (dialer) => {
+            dialer.once('ready', (d) => {
+                console.log('ready', d);
+            });
+
+            dialer.once('end', (d) => {
+                console.log('EVENT END', d);
+                this.collection.dialer.findOneAndUpdate(
+                    {_id: d._objectId},
+                    {$set: {state: d.state, _cause: d.cause, active: false}},
+                    (err, res) => {
+                        if (err)
+                            log.error(err);
+                        this.activeDialer.remove(dialer._id);
+                    }
+                )
+            });
+
+            dialer.setReady();
+        });
+
+        this.activeDialer.on('removed', (dialer) => {
+            console.log(dialer)
+        });
+
         this.loadCampaign();
         this.id = 'lock id';
 
@@ -49,23 +76,54 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             if (err)
                 return log.error(err);
 
-            if (res instanceof Array)
+            if (res instanceof Array) {
+                log.info(`Found ${res.length} dialer`);
                 res.forEach((dialer) => {
-                    this.activeDialer.add(dialer._id, new Dialer(dialer, this.collection.members))
+                    this.addDialerFromDb(dialer);
                 })
+            } else {
+                log.debug('Not found dialer');
+            }
         })
     }
 
-    run() {
+    stopDialerById (id, domain, cb) {
+        let dialer = this.activeDialer.get(id);
+        if (!dialer)
+            return cb(new Error("Not found"));
+        dialer.setState(DialerStates.ProcessStop);
+        return cb(null, {ok: 1});
+    }
 
+    runDialerById(id, domain, cb) {
+        if (!ObjectID.isValid(id))
+            return cb(new Error("Bad object id"));
+
+        this.collection.dialer.findOne({_id: new ObjectID(id), domain: domain}, (err, res) => {
+            if (err)
+                return cb(err);
+
+            let error = this.addDialerFromDb(res);
+            if (error)
+                return cb(error);
+            return cb(null, {active: true});
+        });
+    }
+
+    addDialerFromDb (dialerDb) {
+
+        if (dialerDb.active) {
+            log.warn(`Dialer ${dialerDb.name} - ${dialerDb._id} is active.`);
+            //return new Error("Dialer is active...");
+        }
+
+        let dialer = new Dialer(dialerDb, this.collection.members);
+        this.activeDialer.add(dialer._id, dialer);
+        return null;
     }
 };
-/*
-// Лочити мембера ынстанс ыд, даӕ можливысть пысля ребуту знати на якый машины впало...
-// Прыоритет мембера быльший прыоритету номера в ньому... вибирати по одному мемберу по формулы створений + прыоритет, потым обыд номерыв в залежносты выд стратегы,
-//          чи на всы номери одночасно чи по прыоритету...
-   З операторами просто слдкувати щоб було >> 1 вльного щоб запускати орджнейт
-*/
+
+
 function dynamicSort(property) {
     var sortOrder = 1;
     if(property[0] === "-") {
@@ -236,18 +294,29 @@ class Router extends EventEmitter2 {
     }
 }
 
+const DialerStates = {
+    Idle: 0,
+    Work: 1,
+    Sleep: 2,
+    ProcessStop: 3,
+    End: 4
+};
+
 class Dialer extends Router {
     constructor (config, dbCollection) {
         super();
         // TODO string ????
         this._id = config._id.toString();
+        this._objectId = config._id;
 
         this.name = config.name;
         this._limit = MAX_MEMBER_RETRY;
         this._maxTryCount = 5;
         this._intervalTryCount = 5;
         this._timerId = null;
-        this._resources = null;
+
+        this.state = DialerStates.Idle;
+        this.cause = "INIT";
 
         this._countRequestHunting = 0;
 
@@ -257,7 +326,7 @@ class Dialer extends Router {
             this._intervalTryCount = config.parameters.intervalTryCount || 5;
         };
 
-        this._variables =config.variables;
+        this._variables = config.variables;
 
         this._setResource(config.resources);
 
@@ -296,7 +365,18 @@ class Dialer extends Router {
             })
         };
 
-        this._typesReserve = {
+        let typesUnReserve = {
+            'progressive': function (id, cb) {
+                dbCollection.findOneAndUpdate(
+                    {_id: id},
+                    {$set: {_lock: null}},
+                    cb
+                )
+            }
+        };
+        typesUnReserve['auto dialer'] = typesUnReserve.progressive;
+
+        let typesReserve = {
             'progressive': function (cb) {
                 let communications = {
                     $elemMatch: {
@@ -327,8 +407,6 @@ class Dialer extends Router {
                     "communications.gatewayPositionMap": 1
                 };
 
-                console.log(filter);
-
                 dbCollection.findOneAndUpdate(
                     filter,
                     {$set: {_lock: this._id}},
@@ -338,10 +416,9 @@ class Dialer extends Router {
                 )
             }.bind(this)
         };
-        // TODO
-        this._typesReserve['auto dialer'] = this._typesReserve.progressive;
+        typesReserve['auto dialer'] = typesReserve.progressive;
 
-        let responseCall = {
+        let dialMember = {
             progressive: function (resEls, member) {
 
 
@@ -394,17 +471,15 @@ class Dialer extends Router {
             }.bind(this)
         };
 
-        if (typeof this._typesReserve[this.type] !== 'function' || typeof responseCall[this.type] !== 'function') {
-            return log.error(`Bad dialer ${this._id} type ${this.type}`);
-        } else {
-            log.trace(`Init dialer ${this.name} - ${this._id} type ${this.type}`);
-        }
-        this.dialMember = responseCall[this.type];
+        this.dialMember = dialMember[this.type];
+        this.unReserveMember = typesUnReserve[this.type];
+        this.reserveMember = typesReserve[this.type];
 
 
         this.members = new Collection('id');
 
         this.members.on('added', (member) => {
+
             log.trace(`Members length ${this.members.length()}`);
 
             member.once('end', (m) => {
@@ -441,27 +516,46 @@ class Dialer extends Router {
             if (!this.checkLimit())
                 this.getNextMember();
         });
+    }
 
+    setReady () {
+        if (typeof this.reserveMember !== 'function' || typeof this.dialMember !== 'function' || typeof this.unReserveMember !== 'function') {
+            this.cause = `Not implement ${this.type}`;
+            this.emit('end', this);
+            return log.error(`Bad dialer ${this._id} type ${this.type}`);
+        } else {
+            log.trace(`Init dialer ${this.name} - ${this._id} type ${this.type}`);
+        }
+        this.cause = "IS_READY";
+        this.state = DialerStates.Work;
+        this.emit('ready', this);
         this.getNextMember();
     }
 
     checkLimit () {
-        return this._countRequestHunting >= this._limit || this.members.length() + 1 >= this._limit
+        return this.state === DialerStates.Work &&  this._countRequestHunting >= this._limit || this.members.length() + 1 >= this._limit
     }
 
+    setState (state) {
+        this.state = state;
+    }
+
+    isReady () {
+        return this.state === DialerStates.Work;
+    }
 
     getNextMember () {
         log.trace(`find members in ${this.name} - members queue: ${this.members.length()}`);
 
-        console.log(this._countRequestHunting)
-        console.log(this._limit)
-        console.log(this._limit)
+        if (!this.isReady())
+            this.tryStop();
 
         if (this.checkLimit())
             return;
 
         this._countRequestHunting++;
-        this._typesReserve[this.type]( (err, res) => {
+
+        this.reserveMember( (err, res) => {
             this._countRequestHunting--;
             if (err)
                 return log.error(err);
@@ -473,6 +567,14 @@ class Dialer extends Router {
                 return log.debug (`Not found members in ${this.name}`);
             }
 
+            if (!this.isReady()) {
+                this.unReserveMember(res.value._id, (err) => {
+                    if (err)
+                        return log.error(err);
+                });
+                this.tryStop();
+                return
+            }
 
             if (this.members.existsKey(res.value._id))
                 return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
@@ -484,6 +586,19 @@ class Dialer extends Router {
     }
 
     tryStop () {
+
+        console.log('state', this.state);
+        if (this.state === DialerStates.ProcessStop) {
+            if (this.members.length() != 0)
+                return;
+
+            log.info('Stop dialer');
+            this.cause = "PROCESS_STOP";
+            this.active = false;
+            this.emit('end', this);
+            return
+        }
+
         if (this._processTryStop || this.checkLimit())
             return;
         this._processTryStop = true;
