@@ -134,7 +134,7 @@ class Application extends EventEmitter2 {
         esl.on('error', function(e) {
             log.error('freeSWITCH connect error:', e);
             esl.connected = false;
-
+            scope.emit('sys::errorConnectFsApi');
             setTimeout(function () {
                 scope.connectToEsl();
             }, waitTimeReconnectFreeSWITCH);

@@ -9,6 +9,7 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     async = require('async'),
     generateUuid = require('node-uuid'),
     ObjectID = require('mongodb').ObjectID,
+    moment = require('moment-timezone'),
     Collection = require(__appRoot + '/lib/collection');
 
 const END_CAUSE = {
@@ -24,27 +25,49 @@ const CODE_RESPONSE_OK = ["NORMAL_CLEARING"];
 const MAX_MEMBER_RETRY = 999;
 
 
+function addTimeToDate(time) {
+    return new Date(Date.now() + time)
+}
+
 
 module.exports =  class AutoDialer extends EventEmitter2 {
     constructor (app) {
         super();
         this._app = app;
         this.activeDialer = new Collection('id');
+        let connectDb, connectFs = false;
 
         log.debug('Init AutoDialer');
 
+        app.on('sys::connectDb', () => { connectDb = true; });
+        app.on('sys::connectDbError', () => { connectDb = false; });
+
+        app.on('sys::connectFsApi', () => { connectFs = true; });
+        app.on('sys::errorConnectFsApi', () => { connectFs = false; });
+
+
         this.collection = {
             dialer: app.DB.collection('dialer'),
+            calendar: app.DB.collection('calendar'),
             members: app.DB.collection('agentStatusEngine')
         };
 
         this.activeDialer.on('added', (dialer) => {
             dialer.once('ready', (d) => {
-                console.log('ready', d);
+                log.debug(`Ready dialer ${d.name} - ${d._id}`);
+                this.collection.dialer.findOneAndUpdate(
+                    {_id: d._objectId},
+                    {$set: {state: d.state, _cause: d.cause, active: true}},
+                    (err, res) => {
+                        if (err)
+                            log.error(err);
+
+                    }
+                )
             });
 
             dialer.once('end', (d) => {
-                console.log('EVENT END', d);
+                log.debug(`End dialer ${d.name} - ${d._id}`);
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
                     {$set: {state: d.state, _cause: d.cause, active: false}},
@@ -56,17 +79,39 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                 )
             });
 
+            dialer.once('sleep', (d) => {
+                this.collection.dialer.findOneAndUpdate(
+                    {_id: d._objectId},
+                    {$set: {state: d.state, _cause: d.cause, active: true}},
+                    (err, res) => {
+                        if (err)
+                            log.error(err);
+                    }
+                )
+                this.addTask(d);
+                //console.log(d);
+            });
+
             dialer.setReady();
+
         });
 
         this.activeDialer.on('removed', (dialer) => {
-            console.log(dialer)
+            log.info(`Remove active dialer ${dialer.name} : ${dialer._id}`);
         });
 
         this.loadCampaign();
         this.id = 'lock id';
 
         app.Esl.subscribe('CHANNEL_HANGUP_COMPLETE');
+    }
+
+    addTask (dialer) {
+        log.info(`Dialer ${dialer.name}@${dialer._domain} next try ${new Date(Date.now() + dialer._sleepNextTry)}`);
+        setTimeout(() => {
+            dialer.setReady()
+        }, dialer._sleepNextTry);
+
     }
 
     loadCampaign () {
@@ -99,6 +144,10 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         if (!ObjectID.isValid(id))
             return cb(new Error("Bad object id"));
 
+        let ad = this.activeDialer.get(id)
+        if (ad)
+            return cb && cb(null, {active: true});
+
         this.collection.dialer.findOne({_id: new ObjectID(id), domain: domain}, (err, res) => {
             if (err)
                 return cb(err);
@@ -117,8 +166,18 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             //return new Error("Dialer is active...");
         }
 
-        let dialer = new Dialer(dialerDb, this.collection.members);
-        this.activeDialer.add(dialer._id, dialer);
+        let calendarId = dialerDb && dialerDb.calendar && dialerDb.calendar.id;
+        if (calendarId && ObjectID.isValid(calendarId))
+            calendarId = new ObjectID(calendarId);
+
+        this.collection.calendar.findOne({_id: calendarId}, (err, res) => {
+            if (err)
+                return log.error(err);
+
+            let dialer = new Dialer(dialerDb, this.collection.members, res);
+            this.activeDialer.add(dialer._id, dialer);
+        });
+
         return null;
     }
 };
@@ -166,8 +225,15 @@ class Gw {
         let vars = [`origination_uuid=${member.sessionId}`].concat(this._vars);
 
         if (!member.getVariable('origination_caller_id_number')) {
-            member.setVariable('origination_caller_id_number', member.number);
-            member.setVariable('origination_caller_id_name', member.name);
+            if (!operator) {
+                member.setVariable('origination_caller_id_number', member.queueNumber);
+                member.setVariable('origination_caller_id_name', member.queueName);
+                member.setVariable('origination_callee_id_number', member.number);
+                member.setVariable('origination_callee_id_name', member.name);
+            } else {
+                member.setVariable('origination_callee_id_number', member.number);
+                member.setVariable('origination_caller_id_name', member.name);
+            }
         }
 
         for (let key of member.getVariableKeys()) {
@@ -180,7 +246,7 @@ class Gw {
         if (operator && !predictive)
             return `originate {${vars}}user/${operator} $bridge(${gwString})`;
 
-
+        vars.push(`dlr_queue=${member._queueId}`);
         return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
     }
 
@@ -302,23 +368,39 @@ const DialerStates = {
     End: 4
 };
 
+const DialerCauses = {
+    Init: "INIT",
+    ProcessStop: "PROCESS_STOP",
+    ProcessRecovery: "PROCESS_RECOVERY",
+    ProcessSleep: "PROCESS_SLEEP",
+    ProcessReady: "PROCESS_HUNTING",
+    ProcessNotFoundMember: "NOT_FOUND_MEMBER",
+    ProcessExpire: "PROCESS_EXPIRE"
+};
+
 class Dialer extends Router {
-    constructor (config, dbCollection) {
+    constructor (config, dbCollection, calendarConfig) {
         super();
         // TODO string ????
         this._id = config._id.toString();
         this._objectId = config._id;
+        //this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.name = config.name;
+        this.number = config.number || this.name;
         this._limit = MAX_MEMBER_RETRY;
         this._maxTryCount = 5;
         this._intervalTryCount = 5;
         this._timerId = null;
+        this._domain = config.domain
+
 
         this.state = DialerStates.Idle;
-        this.cause = "INIT";
+        this.cause = DialerCauses.Init;
 
         this._countRequestHunting = 0;
+
+        this.initCalendar(calendarConfig);
 
         if (config.parameters instanceof Object) {
             this._limit = config.parameters.limit || MAX_MEMBER_RETRY;
@@ -346,7 +428,7 @@ class Dialer extends Router {
             //}
             dbCollection.aggregate([
                 //{$match: {"dialer": this._id,  "_endCause": null}},
-                {$match: {"dialer": this._id, "_endCause": null, "communications.state": 0}},
+                {$match: {"dialer": this._id, _lock: null, "_endCause": null, "communications.state": 0}},
                 {
                     $group: {
                         _id: '',
@@ -406,12 +488,13 @@ class Dialer extends Router {
                     "communications.state": 1,
                     "communications.gatewayPositionMap": 1
                 };
+                console.dir(filter, {depth: 5, colors: true});
 
                 dbCollection.findOneAndUpdate(
                     filter,
                     {$set: {_lock: this._id}},
-                    {sort: {_nextTryTime: 1, priority: -1, _id: -1}},
-                    //{sort: [["_nextTryTime", 1],["priority", -1], ["_id", -1]]},
+                    //{sort: {_nextTryTime: 1, priority: -1, _id: -1}},
+                    {sort: [["_nextTryTime", 1],["priority", -1], ["_id", -1]]},
                     cb
                 )
             }.bind(this)
@@ -506,34 +589,153 @@ class Dialer extends Router {
                 );
             });
 
-            if (!this.checkLimit())
+            if (!this.checkLimit() && this.isReady())
                 this.getNextMember();
 
             this.dialMember(member);
         });
 
         this.members.on('removed', () => {
+            if (!this.isReady() || this.members.length() === 0)
+                return this.tryStop();
+
             if (!this.checkLimit())
                 this.getNextMember();
         });
     }
 
+    initCalendar (conf) {
+        this._calendarMap = {};
+        this._calendar = conf;
+        if (conf.accept instanceof Array) {
+            let sort = conf.accept.sort(dynamicSort('weekDay'));
+
+            let getValue = function (v, last) {
+                return {
+                    startTime: v.startTime,
+                    endTime: v.endTime,
+                    next: last
+                };
+            };
+
+            for (let i = 0, len = sort.length, last = i !== len - 1; i < len; i++) {
+                if (this._calendarMap[sort[i].weekDay]) {
+                    this._calendarMap[sort[i].weekDay].push(getValue(sort[i], last));
+                    this._calendarMap[sort[i].weekDay].sort(dynamicSort('startTime'));
+                } else {
+                    this._calendarMap[sort[i].weekDay] = [getValue(sort[i], last)];
+                }
+            }
+        }
+    }
+
+    checkSleep (calendar) {
+        if (!calendar) {
+            return true;
+        }
+
+        let current;
+        if (calendar.timeZone && calendar.timeZone.id)
+            current = moment().tz(calendar.timeZone.id);
+        else current = moment();
+
+
+        let currentTime = current.valueOf();
+
+        let expireCb = function () {
+            this.cause = DialerCauses.ProcessExpire;
+            this.state = DialerStates.End;
+        }.bind(this);
+
+        let sleepCb = function (sleepTime) {
+            this.cause = DialerCauses.ProcessSleep;
+            this.state = DialerStates.Sleep;
+            this._sleepNextTry = sleepTime;
+        }.bind(this);
+        
+        let between = function (x, min, max) {
+            return x >= min && x <= max;
+        };
+
+        // Check range date;
+        if (this._calendar.startDate && currentTime < this._calendar.startDate) {
+            sleepCb(new Date(this._calendar.startDate).getTime() - Date.now() + 1);
+            return false;
+        } else if (this._calendar.endDate && currentTime > this._calendar.endDate) {
+            expireCb();
+            return false
+        }
+
+        let currentWeek = current.day();
+        let currentTimeOfDay = current.get('hours') * 60 + current.get('minutes');
+        let nextOfDey = false;
+
+        if (this._calendarMap[currentWeek] instanceof Array) {
+            let c = this._calendarMap[currentWeek];
+
+            for (let i = 0, len = c.length; i < len; i++) {
+                nextOfDey = c[i].last;
+                if (between(currentTimeOfDay, c[i].startTime, c[i].endTime)) {
+                    return true;
+                }
+            }
+        }
+
+
+
+
+        for (let i = 0, len = accepts.length; i < len; i++) {
+            let nextTry;
+            if (between(currentTimeOfDay, accepts[i].startTime, accepts[i].endTime)) {
+                setTimeout(() => {
+                    sleepCb(nextTry)
+                }, (accepts[i].endTime - currentTimeOfDay) * 60 * 1000 );
+                nextTry = accepts[i + 1] ? (accepts[i + 1].startTime - currentTimeOfDay) * 60 * 1000 : (1441 - currentTimeOfDay) * 60 * 1000;
+                log.debug(`Dialer ${this.name} sleep in ${addTimeToDate((accepts[i].endTime - currentTimeOfDay) * 60 * 1000)}, next sleep: ${nextTry}`);
+                return true
+            }
+        }
+
+        if (currentTimeOfDay < accepts[0].startTime) {
+            sleepCb((accepts[0].startTime - currentTimeOfDay) - currentTimeOfDay);
+            return false;
+        }
+
+        if (currentTimeOfDay > accepts[accepts.length - 1].endTime) {
+            sleepCb(1000);
+            return false;
+        }
+
+        if (accepts[accepts.length - 1].startTime > currentTimeOfDay) {
+            sleepCb((accepts[accepts.length - 1].startTime - currentTimeOfDay) * 60 * 1000);
+            return false;
+        }
+
+
+
+        //console.log(accepts);
+        //this.emit('ini', this);
+        throw accepts
+    }
+
     setReady () {
         if (typeof this.reserveMember !== 'function' || typeof this.dialMember !== 'function' || typeof this.unReserveMember !== 'function') {
             this.cause = `Not implement ${this.type}`;
+            this.setState(DialerStates.End);
             this.emit('end', this);
             return log.error(`Bad dialer ${this._id} type ${this.type}`);
         } else {
             log.trace(`Init dialer ${this.name} - ${this._id} type ${this.type}`);
         }
-        this.cause = "IS_READY";
+
+        this.cause = DialerCauses.ProcessReady;
         this.state = DialerStates.Work;
         this.emit('ready', this);
         this.getNextMember();
     }
 
     checkLimit () {
-        return this.state === DialerStates.Work &&  this._countRequestHunting >= this._limit || this.members.length() + 1 >= this._limit
+        return (this._countRequestHunting >= this._limit || this.members.length() + 1 >= this._limit);
     }
 
     setState (state) {
@@ -555,15 +757,12 @@ class Dialer extends Router {
 
         this._countRequestHunting++;
 
-        this.reserveMember( (err, res) => {
+        this.reserveMember( (err, res, q) => {
             this._countRequestHunting--;
             if (err)
                 return log.error(err);
 
             if (!res || !res.value) {
-                // End members;
-                if (!this.checkLimit())
-                    this.tryStop();
                 return log.debug (`Not found members in ${this.name}`);
             }
 
@@ -572,14 +771,21 @@ class Dialer extends Router {
                     if (err)
                         return log.error(err);
                 });
-                this.tryStop();
                 return
             }
 
             if (this.members.existsKey(res.value._id))
                 return log.warn(`Member in queue ${this.name} : ${res.value._id}`);
 
-            let m = new Member(res.value, this._maxTryCount, this._intervalTryCount, this._lockedGateways);
+            let option = {
+                maxTryCount: this._maxTryCount,
+                intervalTryCount: this._intervalTryCount,
+                lockedGateways: this._lockedGateways,
+                queueId: this._id,
+                queueName: this.name,
+                queueNumber: this.number
+            };
+            let m = new Member(res.value, option);
             this.members.add(m._id, m);
         });
 
@@ -593,9 +799,16 @@ class Dialer extends Router {
                 return;
 
             log.info('Stop dialer');
-            this.cause = "PROCESS_STOP";
+
+            this.cause = DialerCauses.ProcessStop;
             this.active = false;
             this.emit('end', this);
+            return
+        }
+
+        if (this.state === DialerStates.Sleep) {
+            if (this.members.length() === 0)
+                this.emit('sleep', this);
             return
         }
 
@@ -608,15 +821,22 @@ class Dialer extends Router {
             if (err)
                 return log.error(err);
 
-            if (!res)
+            if (!res && this.members.length() === 0) {
+                this.setState(DialerStates.End);
+                this.emit('end', this);
                 return log.info(`STOP DIALER ${this.name}`);
+            }
 
-            log.trace(`Status ${this.name} : ${res.count || 0}, nextTryTime: ${res.nextTryTime}`);
+            if (!res)
+                return;
+
+            log.trace(`Status ${this.name} : state - ${this.state}; count - ${res.count || 0}; nextTryTime - ${res.nextTryTime}`);
 
             if (res.count === 0)
                 return log.info(`STOP DIALER ${this.name}`);
 
             this._processTryStop = false;
+            if (!res.nextTryTime) res.nextTryTime = Date.now() + 1000;
             if (res.nextTryTime > 0) {
                 let nextTime = res.nextTryTime - Date.now();
                 if (nextTime < 1)
@@ -645,16 +865,22 @@ const MemberState = {
     Idle: 0,
     Process: 1,
     End: 2
-}
+};
 
 class Member extends EventEmitter2 {
-    constructor (config, maxTryCount, nextTrySec, lockedGws) {
+    constructor (config, option) {
         super();
         if (config._lock)
             throw config;
 
-        this.tryCount = maxTryCount;
-        this.nextTrySec = nextTrySec;
+        this.tryCount = option.maxTryCount;
+        this.nextTrySec = option.intervalTryCount;
+
+        this.queueName = option.queueName ;
+        this._queueId = option.queueId;
+        this.queueNumber = option.queueNumber || option.queueName;
+
+        let lockedGws = option.lockedGateways;
 
         this._id = config._id;
 
@@ -736,7 +962,7 @@ class Member extends EventEmitter2 {
     }
 
     log (str) {
-        log.trace(str);
+        log.trace(this._id + ' -> ' + str);
         this._log.steps.push({
             time: Date.now(),
             data: str
@@ -770,6 +996,7 @@ class Member extends EventEmitter2 {
                 this.endCause = END_CAUSE.MAX_TRY;
                 this._setStateCurrentNumber(MemberState.End);
             } else {
+                this.nextTime = Date.now() + (this.nextTrySec * 1000);
                 this.log(`Retry: ${endCause}`);
                 this._setStateCurrentNumber(MemberState.Idle);
             }

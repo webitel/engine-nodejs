@@ -167,7 +167,9 @@ function listMembers (req, res, next) {
             if (_f.length == 2) {
                 if (/^\^/.test(_f[1]))
                     options.filter[_f[0]] = {$regex: _f[1]};
-                else options.filter[_f[0]] = isNaN(parseInt(_f[1])) ?_f[1] : parseInt(_f[1]);
+                else if (/^true$|^false$/.test(_f[1])) {
+                    options.filter[_f[0]] = {exists: _f[1] === "true"};
+                } else options.filter[_f[0]] = isNaN(parseInt(_f[1])) ?_f[1] : parseInt(_f[1]);
             }
         });
     };
