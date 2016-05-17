@@ -60,7 +60,7 @@ let Service = {
             option.domain = domain;
             if (option.state == 1) {
                 return application.AutoDialer.runDialerById(option.id, domain, cb);
-            } else if (option.state == 0) {
+            } else if (option.state == 3) {
                 return application.AutoDialer.stopDialerById(option.id, domain, cb);
             }
 

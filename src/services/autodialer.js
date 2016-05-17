@@ -27,8 +27,45 @@ const MAX_MEMBER_RETRY = 999;
 
 function addTimeToDate(time) {
     return new Date(Date.now() + time)
-}
+};
 
+function getDeadlineMinuteFromSortMap (currentMinuteOfDay, currentWeek, map) {
+    // TODO
+
+    let i = parseInt(currentWeek),
+        count = 0,
+        result = {active: false, minute: null},
+        offsetDay = 0;
+    while (1) {
+        i = (i > 7) ? 1 : i;
+        if (map[i] instanceof Array) {
+            for (let item of map[i]) {
+                if (count === 0 && item.endTime > currentMinuteOfDay) {
+                    if (item.startTime > currentMinuteOfDay) {
+                        result.minute = item.startTime - currentMinuteOfDay;
+                        return result;
+                    } else {
+                        result.minute = item.endTime - currentMinuteOfDay;
+                        result.active = true;
+                        return result;
+                    }
+                }
+
+                if (count === 0 && item.endTime <= currentMinuteOfDay && item.startTime >= currentMinuteOfDay) {
+                    break;
+                }
+
+                if (count !== 0) {
+                    result.minute = offsetDay += item.startTime;
+                    return result;
+                }
+            }
+        }
+        offsetDay += (count == 0 ? 1440 - currentMinuteOfDay : 1440);
+        i++;
+        count++;
+    }
+}
 
 module.exports =  class AutoDialer extends EventEmitter2 {
     constructor (app) {
@@ -53,11 +90,11 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         };
 
         this.activeDialer.on('added', (dialer) => {
-            dialer.once('ready', (d) => {
+            dialer.on('ready', (d) => {
                 log.debug(`Ready dialer ${d.name} - ${d._id}`);
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
-                    {$set: {state: d.state, _cause: d.cause, active: true}},
+                    {$set: {state: d.state, _cause: d.cause, active: true, nextTick: null}},
                     (err, res) => {
                         if (err)
                             log.error(err);
@@ -68,9 +105,10 @@ module.exports =  class AutoDialer extends EventEmitter2 {
 
             dialer.once('end', (d) => {
                 log.debug(`End dialer ${d.name} - ${d._id}`);
+                clearTimeout(d._taskSleepId);
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
-                    {$set: {state: d.state, _cause: d.cause, active: false}},
+                    {$set: {state: d.state, _cause: d.cause, active: false, nextTick: null}},
                     (err, res) => {
                         if (err)
                             log.error(err);
@@ -79,15 +117,15 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                 )
             });
 
-            dialer.once('sleep', (d) => {
+            dialer.on('sleep', (d) => {
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
-                    {$set: {state: d.state, _cause: d.cause, active: true}},
+                    {$set: {state: d.state, _cause: d.cause, active: true, nextTick: new Date(Date.now() + dialer._sleepNextTry)}},
                     (err, res) => {
                         if (err)
                             log.error(err);
                     }
-                )
+                );
                 this.addTask(d);
                 //console.log(d);
             });
@@ -108,7 +146,7 @@ module.exports =  class AutoDialer extends EventEmitter2 {
 
     addTask (dialer) {
         log.info(`Dialer ${dialer.name}@${dialer._domain} next try ${new Date(Date.now() + dialer._sleepNextTry)}`);
-        setTimeout(() => {
+        dialer._taskSleepId = setTimeout(() => {
             dialer.setReady()
         }, dialer._sleepNextTry);
 
@@ -137,14 +175,14 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         if (!dialer)
             return cb(new Error("Not found"));
         dialer.setState(DialerStates.ProcessStop);
-        return cb(null, {ok: 1});
+        return cb(null, dialer.toJson());
     }
 
     runDialerById(id, domain, cb) {
         if (!ObjectID.isValid(id))
             return cb(new Error("Bad object id"));
 
-        let ad = this.activeDialer.get(id)
+        let ad = this.activeDialer.get(id);
         if (ad)
             return cb && cb(null, {active: true});
 
@@ -384,7 +422,7 @@ class Dialer extends Router {
         // TODO string ????
         this._id = config._id.toString();
         this._objectId = config._id;
-        //this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
+        this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.name = config.name;
         this.number = config.number || this.name;
@@ -392,15 +430,13 @@ class Dialer extends Router {
         this._maxTryCount = 5;
         this._intervalTryCount = 5;
         this._timerId = null;
-        this._domain = config.domain
-
+        this._domain = config.domain;
+        this._calendar = calendarConfig;
 
         this.state = DialerStates.Idle;
         this.cause = DialerCauses.Init;
 
         this._countRequestHunting = 0;
-
-        this.initCalendar(calendarConfig);
 
         if (config.parameters instanceof Object) {
             this._limit = config.parameters.limit || MAX_MEMBER_RETRY;
@@ -596,6 +632,7 @@ class Dialer extends Router {
         });
 
         this.members.on('removed', () => {
+            this.checkSleep();
             if (!this.isReady() || this.members.length() === 0)
                 return this.tryStop();
 
@@ -604,11 +641,27 @@ class Dialer extends Router {
         });
     }
 
-    initCalendar (conf) {
-        this._calendarMap = {};
-        this._calendar = conf;
-        if (conf.accept instanceof Array) {
-            let sort = conf.accept.sort(dynamicSort('weekDay'));
+    toJson () {
+        return {
+            "members": this.members.length(),
+            "state": this.state
+        }
+    }
+
+    setSleepStatus (sleepTime) {
+        this.cause = DialerCauses.ProcessSleep;
+        this.state = DialerStates.Sleep;
+        this._sleepNextTry = sleepTime;
+        this.emit('sleep', this);
+    }
+
+    initCalendar () {
+        this._calendarMap = {
+            deadLineTime: 0
+        };
+        let calendar = this._calendar;
+        if (calendar.accept instanceof Array) {
+            let sort = calendar.accept.sort(dynamicSort('weekDay'));
 
             let getValue = function (v, last) {
                 return {
@@ -627,18 +680,11 @@ class Dialer extends Router {
                 }
             }
         }
-    }
-
-    checkSleep (calendar) {
-        if (!calendar) {
-            return true;
-        }
 
         let current;
         if (calendar.timeZone && calendar.timeZone.id)
             current = moment().tz(calendar.timeZone.id);
         else current = moment();
-
 
         let currentTime = current.valueOf();
 
@@ -647,75 +693,36 @@ class Dialer extends Router {
             this.state = DialerStates.End;
         }.bind(this);
 
-        let sleepCb = function (sleepTime) {
-            this.cause = DialerCauses.ProcessSleep;
-            this.state = DialerStates.Sleep;
-            this._sleepNextTry = sleepTime;
-        }.bind(this);
-        
-        let between = function (x, min, max) {
-            return x >= min && x <= max;
-        };
 
         // Check range date;
-        if (this._calendar.startDate && currentTime < this._calendar.startDate) {
-            sleepCb(new Date(this._calendar.startDate).getTime() - Date.now() + 1);
+        if (calendar.startDate && currentTime < calendar.startDate) {
+            this.setSleepStatus(new Date(calendar.startDate).getTime() - Date.now() + 1);
             return false;
-        } else if (this._calendar.endDate && currentTime > this._calendar.endDate) {
+        } else if (calendar && currentTime > calendar) {
             expireCb();
             return false
         }
 
         let currentWeek = current.day();
         let currentTimeOfDay = current.get('hours') * 60 + current.get('minutes');
-        let nextOfDey = false;
 
-        if (this._calendarMap[currentWeek] instanceof Array) {
-            let c = this._calendarMap[currentWeek];
+        let deadLineRes = getDeadlineMinuteFromSortMap(currentTimeOfDay, currentWeek, this._calendarMap);
 
-            for (let i = 0, len = c.length; i < len; i++) {
-                nextOfDey = c[i].last;
-                if (between(currentTimeOfDay, c[i].startTime, c[i].endTime)) {
-                    return true;
-                }
-            }
+
+        if (deadLineRes.active) {
+            this.state = DialerStates.Idle;
+            this._calendarMap.deadLineTime = (deadLineRes.minute * 60 * 1000) + Date.now();
+        } else {
+            this.setSleepStatus(deadLineRes.minute * 60 * 1000);
         }
+    }
 
 
-
-
-        for (let i = 0, len = accepts.length; i < len; i++) {
-            let nextTry;
-            if (between(currentTimeOfDay, accepts[i].startTime, accepts[i].endTime)) {
-                setTimeout(() => {
-                    sleepCb(nextTry)
-                }, (accepts[i].endTime - currentTimeOfDay) * 60 * 1000 );
-                nextTry = accepts[i + 1] ? (accepts[i + 1].startTime - currentTimeOfDay) * 60 * 1000 : (1441 - currentTimeOfDay) * 60 * 1000;
-                log.debug(`Dialer ${this.name} sleep in ${addTimeToDate((accepts[i].endTime - currentTimeOfDay) * 60 * 1000)}, next sleep: ${nextTry}`);
-                return true
-            }
+    checkSleep () {
+        if (Date.now() >= this._calendarMap.deadLineTime && this.state !== DialerStates.Sleep) {
+            this.initCalendar();
+            this.setState(DialerStates.Sleep);
         }
-
-        if (currentTimeOfDay < accepts[0].startTime) {
-            sleepCb((accepts[0].startTime - currentTimeOfDay) - currentTimeOfDay);
-            return false;
-        }
-
-        if (currentTimeOfDay > accepts[accepts.length - 1].endTime) {
-            sleepCb(1000);
-            return false;
-        }
-
-        if (accepts[accepts.length - 1].startTime > currentTimeOfDay) {
-            sleepCb((accepts[accepts.length - 1].startTime - currentTimeOfDay) * 60 * 1000);
-            return false;
-        }
-
-
-
-        //console.log(accepts);
-        //this.emit('ini', this);
-        throw accepts
     }
 
     setReady () {
@@ -727,7 +734,9 @@ class Dialer extends Router {
         } else {
             log.trace(`Init dialer ${this.name} - ${this._id} type ${this.type}`);
         }
-
+        this.initCalendar();
+        if (this.state !== DialerStates.Idle)
+            return;
         this.cause = DialerCauses.ProcessReady;
         this.state = DialerStates.Work;
         this.emit('ready', this);
@@ -740,6 +749,11 @@ class Dialer extends Router {
 
     setState (state) {
         this.state = state;
+
+        if (state === DialerStates.ProcessStop && this.members.length() === 0) {
+            this.cause = DialerCauses.ProcessStop;
+            this.emit('end', this);
+        };
     }
 
     isReady () {
@@ -793,7 +807,7 @@ class Dialer extends Router {
 
     tryStop () {
 
-        console.log('state', this.state);
+        console.log('state', this.state, this.members.length());
         if (this.state === DialerStates.ProcessStop) {
             if (this.members.length() != 0)
                 return;
@@ -807,8 +821,6 @@ class Dialer extends Router {
         }
 
         if (this.state === DialerStates.Sleep) {
-            if (this.members.length() === 0)
-                this.emit('sleep', this);
             return
         }
 
@@ -954,7 +966,7 @@ class Member extends EventEmitter2 {
     }
 
     getVariable (varName) {
-        return this.variables[varName] ;
+        return this.variables[varName];
     }
 
     getVariableKeys () {
