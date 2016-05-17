@@ -27,7 +27,7 @@ const MAX_MEMBER_RETRY = 999;
 
 function addTimeToDate(time) {
     return new Date(Date.now() + time)
-};
+}
 
 function getDeadlineMinuteFromSortMap (currentMinuteOfDay, currentWeek, map) {
     // TODO
@@ -67,6 +67,18 @@ function getDeadlineMinuteFromSortMap (currentMinuteOfDay, currentWeek, map) {
     }
 }
 
+function dynamicSort(property) {
+    var sortOrder = 1;
+    if(property[0] === "-") {
+        sortOrder = -1;
+        property = property.substr(1);
+    }
+    return function (a,b) {
+        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
+        return result * sortOrder;
+    }
+}
+
 module.exports =  class AutoDialer extends EventEmitter2 {
     constructor (app) {
         super();
@@ -90,6 +102,7 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         };
 
         this.activeDialer.on('added', (dialer) => {
+
             dialer.on('ready', (d) => {
                 log.debug(`Ready dialer ${d.name} - ${d._id}`);
                 this.collection.dialer.findOneAndUpdate(
@@ -127,7 +140,6 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                     }
                 );
                 this.addTask(d);
-                //console.log(d);
             });
 
             dialer.setReady();
@@ -219,19 +231,6 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         return null;
     }
 };
-
-
-function dynamicSort(property) {
-    var sortOrder = 1;
-    if(property[0] === "-") {
-        sortOrder = -1;
-        property = property.substr(1);
-    }
-    return function (a,b) {
-        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
-        return result * sortOrder;
-    }
-}
 
 class Gw {
     constructor (conf, regex, variables) {
@@ -512,7 +511,7 @@ class Dialer extends Router {
                     _endCause: null,
                     _lock: null,
                     communications,
-                    $or: [{_nextTryTime: null}, {_nextTryTime: {$lte: Date.now()}}]
+                    $or: [{_nextTryTime: {$lte: Date.now()}}, {_nextTryTime: null}]
                 };
                 let i = {
                     _nextTryTime: -1,
@@ -529,8 +528,7 @@ class Dialer extends Router {
                 dbCollection.findOneAndUpdate(
                     filter,
                     {$set: {_lock: this._id}},
-                    //{sort: {_nextTryTime: 1, priority: -1, _id: -1}},
-                    {sort: [["_nextTryTime", 1],["priority", -1], ["_id", -1]]},
+                    {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
                     cb
                 )
             }.bind(this)
@@ -1009,6 +1007,7 @@ class Member extends EventEmitter2 {
                 this._setStateCurrentNumber(MemberState.End);
             } else {
                 this.nextTime = Date.now() + (this.nextTrySec * 1000);
+                this.log(`min next time: ${this.nextTime}`);
                 this.log(`Retry: ${endCause}`);
                 this._setStateCurrentNumber(MemberState.Idle);
             }
