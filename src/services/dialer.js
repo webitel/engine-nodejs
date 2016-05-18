@@ -364,6 +364,34 @@ let Service = {
                 return db.removeMemberById(option.id, option.dialer, cb);
 
             });
+        },
+        
+        aggregate: function (caller, option, cb) {
+            checkPermissions(caller, 'dialer/members', 'r', function (err) {
+                if (err)
+                    return cb(err);
+
+                if (!option)
+                    return cb(new CodeError(400, "Bad request options"));
+
+
+                if (!option.data || !(option.data instanceof Array))
+                    return cb(new CodeError(400, 'Bad request: data is required.'));
+
+                if (!option.dialer)
+                    return cb(new CodeError(400, 'Bad request: dialer id is required.'));
+
+
+                // TODO check dialer in domain
+                let domain = validateCallerParameters(caller, option['domain']);
+                if (!domain) {
+                    return cb(new CodeError(400, 'Bad request: domain is required.'));
+                };
+
+                let db = application.DB._query.dialer;
+                return db.aggregateMembers(option.dialer, option.data, cb);
+
+            });
         }
     }
 };

@@ -320,6 +320,7 @@ class Router extends EventEmitter2 {
                         if (i.enabled !== true)
                             return;
 
+                        // Check limit gw;
                         if (maxLimitGw !== -1)
                             if (i.limit === 0) {
                                 maxLimitGw = -1;
@@ -341,7 +342,7 @@ class Router extends EventEmitter2 {
                 }
                 ;
             });
-
+            // set new limit gw && TODO +- limit operator
             if (maxLimitGw !== -1 && this._limit > maxLimitGw)
                 this._limit = maxLimitGw
 
@@ -368,15 +369,15 @@ class Router extends EventEmitter2 {
 
                     member.setVariable('gatewayPositionMap', gatewayPositionMap);
                     if (~this._lockedGateways.indexOf(gatewayPositionMap))
-                        continue;
+                        continue; // Next gw check
 
                     res.dialString = this._resourcePaterns[i].gws[j].tryLock(operator, member);
                     if (res.dialString) {
-                        res.patternIndex = i;
+                        res.patternIndex = i; // Ok gw
                         res.gw = j;
                         break
                     } else {
-                        this._lockedGateways.push(gatewayPositionMap)
+                        this._lockedGateways.push(gatewayPositionMap) // Bad gw
                     }
                 }
             }
@@ -390,7 +391,7 @@ class Router extends EventEmitter2 {
     freeGateway (gw) {
         let gateway = this._resourcePaterns[gw.patternIndex].gws[gw.gw],
             gatewayPositionMap = gw.patternIndex + '>' + gw.gw;
-
+        // Free
         if (gateway.unLock() && ~this._lockedGateways.indexOf(gatewayPositionMap))
             this._lockedGateways.splice(this._lockedGateways.indexOf(gatewayPositionMap), 1)
 
@@ -407,12 +408,13 @@ const DialerStates = {
 
 const DialerCauses = {
     Init: "INIT",
-    ProcessStop: "PROCESS_STOP",
-    ProcessRecovery: "PROCESS_RECOVERY",
-    ProcessSleep: "PROCESS_SLEEP",
-    ProcessReady: "PROCESS_HUNTING",
+    ProcessStop: "QUEUE_STOP",
+    ProcessRecovery: "QUEUE_RECOVERY",
+    ProcessSleep: "QUEUE_SLEEP",
+    ProcessReady: "QUEUE_HUNTING",
     ProcessNotFoundMember: "NOT_FOUND_MEMBER",
-    ProcessExpire: "PROCESS_EXPIRE"
+    ProcessComplete: "QUEUE_COMPLETE",
+    ProcessExpire: "QUEUE_EXPIRE"
 };
 
 class Dialer extends Router {
@@ -421,6 +423,8 @@ class Dialer extends Router {
         // TODO string ????
         this._id = config._id.toString();
         this._objectId = config._id;
+
+        // TODO Delete :)
         this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.name = config.name;
@@ -450,8 +454,9 @@ class Dialer extends Router {
         this.type = config.type;
 
         log.debug(`
-            Init dialer: ${this.name}
+            Init dialer: ${this.name}@${this._domain}
             Config:
+                type: ${this.type}
                 limit: ${this._limit},
                 maxTryCount: ${this._maxTryCount},
                 intervalTryCount: ${this._intervalTryCount}
@@ -552,6 +557,9 @@ class Dialer extends Router {
                     if (gw.dialString) {
 
                         let onChannelHangup = function (e) {
+                            let recordSec = +e.getHeader('variable_record_seconds');
+                            if (recordSec)
+                                member.setRecordSession(recordSec);
                             member.end(e.getHeader('variable_hangup_cause'));
                         };
                         
@@ -614,7 +622,7 @@ class Dialer extends Router {
                     },
                     (err, res) => {
                         if (err)
-                            throw err;
+                            return log.error(err);
 
                         log.trace(`removed ${m.sessionId}`);
                         if (!this.members.remove(m._id))
@@ -706,7 +714,6 @@ class Dialer extends Router {
 
         let deadLineRes = getDeadlineMinuteFromSortMap(currentTimeOfDay, currentWeek, this._calendarMap);
 
-
         if (deadLineRes.active) {
             this.state = DialerStates.Idle;
             this._calendarMap.deadLineTime = (deadLineRes.minute * 60 * 1000) + Date.now();
@@ -775,6 +782,8 @@ class Dialer extends Router {
                 return log.error(err);
 
             if (!res || !res.value) {
+                if (this.members.length() === 0)
+                    this.tryStop();
                 return log.debug (`Not found members in ${this.name}`);
             }
 
@@ -832,6 +841,7 @@ class Dialer extends Router {
                 return log.error(err);
 
             if (!res && this.members.length() === 0) {
+                this.cause = DialerCauses.ProcessNotFoundMember;
                 this.setState(DialerStates.End);
                 this.emit('end', this);
                 return log.info(`STOP DIALER ${this.name}`);
@@ -842,8 +852,12 @@ class Dialer extends Router {
 
             log.trace(`Status ${this.name} : state - ${this.state}; count - ${res.count || 0}; nextTryTime - ${res.nextTryTime}`);
 
-            if (res.count === 0)
+            if (res.count === 0) {
+                this.cause = DialerCauses.ProcessComplete;
+                this.setState(DialerStates.End);
+                this.emit('end', this);
                 return log.info(`STOP DIALER ${this.name}`);
+            }
 
             this._processTryStop = false;
             if (!res.nextTryTime) res.nextTryTime = Date.now() + 1000;
@@ -933,7 +947,7 @@ class Member extends EventEmitter2 {
                         communication._probe = 0;
                     if (!communication.priority)
                         communication.priority = 0;
-                    communication._score = communication.priority - communication._probe;
+                    communication._score = communication.priority - (communication._probe + 1);
                     communication._id = position;
                     return true;
                 }
@@ -977,6 +991,10 @@ class Member extends EventEmitter2 {
             time: Date.now(),
             data: str
         });
+    }
+
+    setRecordSession (sec) {
+        this._log.recordSessionSec = sec;
     }
 
     _setStateCurrentNumber (state) {

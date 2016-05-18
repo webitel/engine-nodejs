@@ -22,6 +22,7 @@ function addRoutes (api) {
 
     api.get('/api/v2/dialer/:dialer/members', listMembers);
     api.get('/api/v2/dialer/:dialer/members/count', countMembers);
+    api.post('/api/v2/dialer/:dialer/members/aggregate', aggregateMembers);
     api.post('/api/v2/dialer/:dialer/members', createMember);
     api.get('/api/v2/dialer/:dialer/members/:id', itemMember);
     api.delete('/api/v2/dialer/:dialer/members/:id', removeMember);
@@ -168,7 +169,7 @@ function listMembers (req, res, next) {
                 if (/^\^/.test(_f[1]))
                     options.filter[_f[0]] = {$regex: _f[1]};
                 else if (/^true$|^false$/.test(_f[1])) {
-                    options.filter[_f[0]] = {exists: _f[1] === "true"};
+                    options.filter[_f[0]] = {$exists: _f[1] === "true"};
                 } else options.filter[_f[0]] = isNaN(parseInt(_f[1])) ?_f[1] : parseInt(_f[1]);
             }
         });
@@ -208,6 +209,24 @@ function countMembers (req, res, next) {
     };
 
     dialerService.members.count(req.webitelUser, options, (err, result) => {
+        if (err)
+            return next(err);
+
+        return res.status(200).json({
+            "status": "OK",
+            "data": result
+        });
+    })
+};
+
+function aggregateMembers (req, res, next) {
+    let options = {
+        dialer: req.params.dialer,
+        domain: req.query.domain,
+        data: req.body
+    };
+
+    dialerService.members.aggregate(req.webitelUser, options, (err, result) => {
         if (err)
             return next(err);
 

@@ -118,5 +118,15 @@ function addQuery (db) {
                 .updateOne({_id: new ObjectID(_id), dialer: dialerId}, data, cb);
 
         },
+        
+        aggregateMembers: function (dialerId, aggregateQuery, cb) {
+            let query = [
+                {$match:{dialer: dialerId}}
+            ];
+            query = query.concat(aggregateQuery);
+            return db
+                .collection(memberCollectionName)
+                .aggregate(query, cb);
+        }
     }
 }

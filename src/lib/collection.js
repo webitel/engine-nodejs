@@ -11,7 +11,8 @@ var HashCollection = module.exports = function() {
     });
     this.add = function(key, element) {
         if (this.collection[key]) {
-            throw new Error('Key ' + key + ' already defined!');
+            console.error(new Error('Key ' + key + ' already defined!'));
+            //throw new Error('Key ' + key + ' already defined!');
         } else {
             this.collection[key] = element;
             length++;

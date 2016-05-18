@@ -48,7 +48,7 @@
         "reconnect": 5
     },
     "cdrServer": {
-        "host": "http://10.10.10.25:10023",
+        "host": "https://pre.webitel.com/cdr/",
         "useProxy": false
     },
     "application": {
@@ -62,7 +62,7 @@
             "node_name": "core"
         },
         "auth": {
-            "tokenSecretKey": "g6Yhdb8jUm!hJ78Jhsw4EEc",
+            "tokenSecretKey": "myDevKey",
             "expiresDays": 7
         },
         "socketTimeUnauthorized": 5,
