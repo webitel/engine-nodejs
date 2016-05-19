@@ -26,6 +26,11 @@ const CODE_RESPONSE_OK = ["NORMAL_CLEARING"];
 
 const MAX_MEMBER_RETRY = 999;
 
+const DIALER_TYPES = {
+    VoiceBroadcasting: "Voice Broadcasting",
+    ProgressiveDialer: "Progressive Dialer"
+};
+
 
 function addTimeToDate(time) {
     return new Date(Date.now() + time)
@@ -562,114 +567,107 @@ class Dialer extends Router {
             })
         };
 
-        let typesUnReserve = {
-            'progressive': function (id, cb) {
-                dbCollection.findOneAndUpdate(
-                    {_id: id},
-                    {$set: {_lock: null}},
-                    cb
-                )
-            }
-        };
-        typesUnReserve['auto dialer'] = typesUnReserve.progressive;
+        let typesUnReserve = {};
 
-        let typesReserve = {
-            'progressive': function (cb) {
-                let communications = {
-                    $elemMatch: {
-                        //state: MemberState.Idle
-                        $or: [{state:MemberState.Idle}, {state:null}]
-                    }
+        typesUnReserve[DIALER_TYPES.ProgressiveDialer] = typesUnReserve[DIALER_TYPES.VoiceBroadcasting] = function (id, cb) {
+            dbCollection.findOneAndUpdate(
+                {_id: id},
+                {$set: {_lock: null}},
+                cb
+            )
+        }.bind(this);
+
+
+
+        let typesReserve = {};
+        typesReserve[DIALER_TYPES.ProgressiveDialer] = typesReserve[DIALER_TYPES.VoiceBroadcasting] = function (cb) {
+            let communications = {
+                $elemMatch: {
+                    //state: MemberState.Idle
+                    $or: [{state:MemberState.Idle}, {state:null}]
+                }
+            };
+            if (this._lockedGateways.length > 0)
+                communications.$elemMatch.gatewayPositionMap = {
+                    $nin: this._lockedGateways
                 };
-                if (this._lockedGateways.length > 0)
-                    communications.$elemMatch.gatewayPositionMap = {
-                        $nin: this._lockedGateways
+
+            let filter = {
+                dialer: this._id,
+                _endCause: null,
+                _lock: null,
+                communications,
+                $or: [{_nextTryTime: {$lte: Date.now()}}, {_nextTryTime: null}]
+            };
+            //let i = {
+            //    _nextTryTime: -1,
+            //    priority: -1,
+            //    _id: -1,
+            //    dialer: 1,
+            //    _endCause: 1,
+            //    _lock: 1,
+            //    "communications.state": 1,
+            //    "communications.gatewayPositionMap": 1
+            //};
+            console.dir(filter, {depth: 5, colors: true});
+
+            dbCollection.findOneAndUpdate(
+                filter,
+                {$set: {_lock: lockId}},
+                {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
+                cb
+            )
+        }.bind(this);
+
+        let dialMember = {};
+        dialMember[DIALER_TYPES.VoiceBroadcasting] = function (member) {
+
+            log.trace(`try call ${member.sessionId}`);
+            let gw = this.getDialStringFromMember(null, member);
+
+            member.log(`dialString: ${gw.dialString}`);
+
+            if (gw.found) {
+                if (gw.dialString) {
+
+                    let onChannelHangup = function (e) {
+                        let recordSec = +e.getHeader('variable_record_seconds');
+                        if (recordSec)
+                            member.setRecordSession(recordSec);
+                        member.end(e.getHeader('variable_hangup_cause'));
                     };
 
-                let filter = {
-                    dialer: this._id,
-                    _endCause: null,
-                    _lock: null,
-                    communications,
-                    $or: [{_nextTryTime: {$lte: Date.now()}}, {_nextTryTime: null}]
-                };
-                let i = {
-                    _nextTryTime: -1,
-                    priority: -1,
-                    _id: -1,
-                    dialer: 1,
-                    _endCause: 1,
-                    _lock: 1,
-                    "communications.state": 1,
-                    "communications.gatewayPositionMap": 1
-                };
-                console.dir(filter, {depth: 5, colors: true});
+                    member.offEslEvent = function () {
+                        application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
+                    };
 
-                dbCollection.findOneAndUpdate(
-                    filter,
-                    {$set: {_lock: lockId}},
-                    {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
-                    cb
-                )
-            }.bind(this)
-        };
-        typesReserve['auto dialer'] = typesReserve.progressive;
+                    application.Esl.once(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
 
-        let dialMember = {
-            progressive: function (resEls, member) {
+                    log.trace(`Call ${gw.dialString}`);
 
+                    application.Esl.bgapi(gw.dialString, (res) => {
 
-            }.bind(this),
+                        this.freeGateway(gw);
 
-            'auto dialer': function (member) {
+                        if (/^-ERR/.test(res.body)) {
+                            member.offEslEvent();
+                            let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
+                            member.end(error);
+                        }
 
-                log.trace(`try call ${member.sessionId}`);
-                let gw = this.getDialStringFromMember(null, member);
-
-                member.log(`dialString: ${gw.dialString}`);
-
-                if (gw.found) {
-                    if (gw.dialString) {
-
-                        let onChannelHangup = function (e) {
-                            let recordSec = +e.getHeader('variable_record_seconds');
-                            if (recordSec)
-                                member.setRecordSession(recordSec);
-                            member.end(e.getHeader('variable_hangup_cause'));
-                        };
-                        
-                        member.offEslEvent = function () {
-                            application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
-                        };
-
-                        application.Esl.once(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
-
-                        log.trace(`Call ${gw.dialString}`);
-
-                        application.Esl.bgapi(gw.dialString, (res) => {
-
-                            this.freeGateway(gw);
-
-                            if (/^-ERR/.test(res.body)) {
-                                member.offEslEvent();
-                                let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
-                                member.end(error);
-                            }
-
-                        });
-                    } else {
-                        // MEGA TODO
-                        member.minusProbe();
-                        this.nextTrySec = 0;
-                        member.end();
-                    }
-
+                    });
                 } else {
-                    member.end(gw.cause);
+                    // MEGA TODO
+                    member.minusProbe();
+                    this.nextTrySec = 0;
+                    member.end();
                 }
 
-            }.bind(this)
-        };
+            } else {
+                member.end(gw.cause);
+            }
+
+        }.bind(this);
 
         this.dialMember = dialMember[this.type];
         this.unReserveMember = typesUnReserve[this.type];
