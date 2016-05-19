@@ -52,6 +52,10 @@ class Application extends EventEmitter2 {
         var conferenceService = require('./services/conference');
         var scope = this,
             ret = 0;
+
+        // todo
+        this.AutoDialer = new AutoDialer(this);
+
         scope.once('sys::connectDb', function (db) {
             //TODO bug!! account event prior connectToEsl
             scope.DB = db;
@@ -99,9 +103,6 @@ class Application extends EventEmitter2 {
                 this.apiCallbackQueue.length = 0;
                 scope.emit('sys::eslConnect');
 
-                //TODO
-                scope.AutoDialer = new AutoDialer(scope);
-
                 log.info('Load tiers');
                 this.bgapi('callcenter_config tier list', function (res) {
                     let body = res && res['body'];
@@ -143,7 +144,7 @@ class Application extends EventEmitter2 {
         esl.on('esl::event::auth::success', function () {
             esl.connected = true;
             console.log('>>> esl::event::auth::success');
-            scope.emit('sys::connectFsApi');
+            scope.emit('sys::connectFsApi', esl);
         });
 
         esl.on('esl::event::auth::fail', function () {

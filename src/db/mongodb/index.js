@@ -6,9 +6,12 @@ var MongoClient = require("mongodb").MongoClient,
 module.exports = initConnect;
 
 function initConnect (server) {
-    var options = {
-        connectionTimeout: 30000,
-        keepAlive: true
+    var options = option = {
+        server: {
+            auto_reconnect: true,
+            //socketOptions: { keepAlive: 1, connectTimeoutMS: 30000 },
+            //replset: { socketOptions: { keepAlive: 1, connectTimeoutMS: 30000 } }
+        }
     };
     mongoClient.connect(config.get('mongodb:uri'), options, function(err, db) {
         if (err) {
@@ -39,6 +42,11 @@ function initConnect (server) {
 
         db.on('close', function () {
             log.warn('close MongoDB');
+            server.emit('sys::closeDb', db);
+        });
+        db.on('reconnect', function () {
+            log.info('Reconnect MongoDB');
+            server.emit('sys::reconnectDb', db);
         });
 
         db.on('error', function (err) {

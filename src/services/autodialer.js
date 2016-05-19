@@ -9,12 +9,14 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     async = require('async'),
     generateUuid = require('node-uuid'),
     ObjectID = require('mongodb').ObjectID,
+    configFile = require(__appRoot + '/conf'),
     moment = require('moment-timezone'),
     Collection = require(__appRoot + '/lib/collection');
 
 const END_CAUSE = {
     NO_ROUTE: "NO_ROUTE",
     MAX_TRY: "MAX_TRY_COUNT",
+    PROCESS_CRASH: "PROCESS_CRASH",
     ACCEPT: "ACCEPT"
 };
 
@@ -79,27 +81,36 @@ function dynamicSort(property) {
     }
 }
 
+class AccountManager {}
+
 module.exports =  class AutoDialer extends EventEmitter2 {
+
     constructor (app) {
         super();
         this._app = app;
+        this.id = 'lock id';
+        this.connectDb = false;
+        this.connectFs = false;
         this.activeDialer = new Collection('id');
-        let connectDb, connectFs = false;
 
         log.debug('Init AutoDialer');
 
-        app.on('sys::connectDb', () => { connectDb = true; });
-        app.on('sys::connectDbError', () => { connectDb = false; });
+        this.on(`changeConnection`, (e) => {
+            if (this.isReady()) {
+                this.loadCampaign();
+            } else {
+                this.forceStop();
+            }
+        });
 
-        app.on('sys::connectFsApi', () => { connectFs = true; });
-        app.on('sys::errorConnectFsApi', () => { connectFs = false; });
+        app.on('sys::connectDb', this.onConnectDb.bind(this));
+        app.on('sys::reconnectDb', this.onConnectDb.bind(this));
 
+        app.on('sys::connectDbError', this.onConnectDbError.bind(this));
+        app.on('sys::closeDb', this.onConnectDbError.bind(this));
 
-        this.collection = {
-            dialer: app.DB.collection('dialer'),
-            calendar: app.DB.collection('calendar'),
-            members: app.DB.collection('agentStatusEngine')
-        };
+        app.on('sys::connectFsApi', this.onConnectFs.bind(this));
+        app.on('sys::errorConnectFsApi', this.onConnectFsError.bind(this));
 
         this.activeDialer.on('added', (dialer) => {
 
@@ -142,6 +153,11 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                 this.addTask(d);
             });
 
+            dialer.on('error', (d) => {
+                log.warn(`remove dialer ${d.name}`);
+                this.activeDialer.remove(d._id);
+            });
+
             dialer.setReady();
 
         });
@@ -149,19 +165,54 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         this.activeDialer.on('removed', (dialer) => {
             log.info(`Remove active dialer ${dialer.name} : ${dialer._id}`);
         });
+    }
 
-        this.loadCampaign();
-        this.id = 'lock id';
+    onConnectFs (esl) {
+        log.debug(`On init esl`);
+        this.connectFs = true;
+        esl.subscribe('CHANNEL_HANGUP_COMPLETE');
+        this.emit('changeConnection');
+    }
 
-        app.Esl.subscribe('CHANNEL_HANGUP_COMPLETE');
+    onConnectFsError (e) {
+        this.connectFs = false;
+        this.emit('changeConnection', false);
+    }
+
+    onConnectDb (db) {
+        log.debug(`On init db`);
+        this.connectDb = true;
+        this.collection = {
+            dialer: db.collection(configFile.get('mongodb:collectionDialer')),
+            calendar: db.collection(configFile.get('mongodb:collectionCalendar')),
+            members: db.collection(configFile.get('mongodb:collectionDialerMembers'))
+        };
+        this.emit('changeConnection');
+    }
+
+    onConnectDbError (e) {
+        log.warn('Db error');
+        this.connectDb = false;
+        this.emit('changeConnection', false);
+    }
+
+    isReady () {
+        return this.connectDb === true && this.connectFs === true;
     }
 
     addTask (dialer) {
         log.info(`Dialer ${dialer.name}@${dialer._domain} next try ${new Date(Date.now() + dialer._sleepNextTry)}`);
+        clearTimeout(dialer._taskSleepId);
+
         dialer._taskSleepId = setTimeout(() => {
+            if (!this.isReady()) {
+                // sleep recovery min
+                dialer._sleepNextTry = 60 * 1000;
+                this.addTask(dialer);
+            }
+
             dialer.setReady()
         }, dialer._sleepNextTry);
-
     }
 
     loadCampaign () {
@@ -174,12 +225,19 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             if (res instanceof Array) {
                 log.info(`Found ${res.length} dialer`);
                 res.forEach((dialer) => {
-                    this.addDialerFromDb(dialer);
+                    this.recoveryCrashDialer(dialer);
                 })
             } else {
                 log.debug('Not found dialer');
             }
         })
+    }
+
+    forceStop () {
+        let keys = this.activeDialer.getKeys();
+        for (let key of keys) {
+            this.activeDialer.get(key).setState(DialerStates.Error);
+        }
     }
 
     stopDialerById (id, domain, cb) {
@@ -224,11 +282,26 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             if (err)
                 return log.error(err);
 
-            let dialer = new Dialer(dialerDb, this.collection.members, res);
+            let dialer = new Dialer(dialerDb, this.collection.members, res, this.id);
             this.activeDialer.add(dialer._id, dialer);
         });
 
         return null;
+    }
+
+    recoveryCrashDialer (dialer) {
+        this.collection
+            .members
+            // TODO Object Id
+            .update(
+                {dialer: dialer._id.toString(), _lock: this.id},
+                {$set: {_endCause: END_CAUSE.PROCESS_CRASH}, $unset: {_lock: null}}, {multi: true},
+                (err) => {
+                    if (err)
+                        return log.error(err);
+                    this.addDialerFromDb(dialer);
+                }
+        )
     }
 };
 
@@ -259,7 +332,7 @@ class Gw {
         this.activeLine++;
         let gwString = member.number.replace(this.regex, this.dialString);
 
-        let vars = [`origination_uuid=${member.sessionId}`].concat(this._vars);
+        let vars = [`origination_uuid=${member.sessionId}`, `dlr_member_id=${member._id.toString()}`].concat(this._vars);
 
         if (!member.getVariable('origination_caller_id_number')) {
             if (!operator) {
@@ -403,7 +476,8 @@ const DialerStates = {
     Work: 1,
     Sleep: 2,
     ProcessStop: 3,
-    End: 4
+    End: 4,
+    Error: 5
 };
 
 const DialerCauses = {
@@ -414,18 +488,19 @@ const DialerCauses = {
     ProcessReady: "QUEUE_HUNTING",
     ProcessNotFoundMember: "NOT_FOUND_MEMBER",
     ProcessComplete: "QUEUE_COMPLETE",
-    ProcessExpire: "QUEUE_EXPIRE"
+    ProcessExpire: "QUEUE_EXPIRE",
+    ProcessInternalError: "QUEUE_ERROR"
 };
 
 class Dialer extends Router {
-    constructor (config, dbCollection, calendarConfig) {
+    constructor (config, dbCollection, calendarConfig, lockId) {
         super();
         // TODO string ????
         this._id = config._id.toString();
         this._objectId = config._id;
 
         // TODO Delete :)
-        this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
+        //this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.name = config.name;
         this.number = config.number || this.name;
@@ -532,7 +607,7 @@ class Dialer extends Router {
 
                 dbCollection.findOneAndUpdate(
                     filter,
-                    {$set: {_lock: this._id}},
+                    {$set: {_lock: lockId}},
                     {sort: [["_nextTryTime", -1],["priority", -1], ["_id", -1]]},
                     cb
                 )
@@ -563,7 +638,7 @@ class Dialer extends Router {
                             member.end(e.getHeader('variable_hangup_cause'));
                         };
                         
-                        let off = function () {
+                        member.offEslEvent = function () {
                             application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
                         };
 
@@ -576,7 +651,7 @@ class Dialer extends Router {
                             this.freeGateway(gw);
 
                             if (/^-ERR/.test(res.body)) {
-                                off();
+                                member.offEslEvent();
                                 let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                                 member.end(error);
                             }
@@ -626,7 +701,7 @@ class Dialer extends Router {
 
                         log.trace(`removed ${m.sessionId}`);
                         if (!this.members.remove(m._id))
-                            throw 'asd'
+                            log.error(new Error(m));
                     }
                 );
             });
@@ -666,7 +741,13 @@ class Dialer extends Router {
             deadLineTime: 0
         };
         let calendar = this._calendar;
-        if (calendar.accept instanceof Array) {
+        let expireCb = function () {
+            this.cause = DialerCauses.ProcessExpire;
+            this.state = DialerStates.End;
+        }.bind(this);
+
+
+        if (calendar && calendar.accept instanceof Array) {
             let sort = calendar.accept.sort(dynamicSort('weekDay'));
 
             let getValue = function (v, last) {
@@ -685,7 +766,10 @@ class Dialer extends Router {
                     this._calendarMap[sort[i].weekDay] = [getValue(sort[i], last)];
                 }
             }
-        }
+        } else {
+            expireCb();
+            return false
+        };
 
         let current;
         if (calendar.timeZone && calendar.timeZone.id)
@@ -693,11 +777,6 @@ class Dialer extends Router {
         else current = moment();
 
         let currentTime = current.valueOf();
-
-        let expireCb = function () {
-            this.cause = DialerCauses.ProcessExpire;
-            this.state = DialerStates.End;
-        }.bind(this);
 
 
         // Check range date;
@@ -721,7 +800,6 @@ class Dialer extends Router {
             this.setSleepStatus(deadLineRes.minute * 60 * 1000);
         }
     }
-
 
     checkSleep () {
         if (Date.now() >= this._calendarMap.deadLineTime && this.state !== DialerStates.Sleep) {
@@ -754,6 +832,22 @@ class Dialer extends Router {
 
     setState (state) {
         this.state = state;
+
+        if (this.isError()) {
+            let ms = this.members.getKeys();
+            ms.forEach((key) => {
+                let m = this.members.get(key);
+                m.removeAllListeners();
+                if (typeof m.offEslEvent == 'function') {
+                    console.log('off member')
+                    m.offEslEvent();
+                }
+                this.members.remove(key)
+            });
+
+            this.emit('error', this);
+            return;
+        }
 
         if (state === DialerStates.ProcessStop && this.members.length() === 0) {
             this.cause = DialerCauses.ProcessStop;
@@ -811,10 +905,18 @@ class Dialer extends Router {
         });
 
     }
+    isError () {
+        return this.state === DialerStates.Error;
+    }
 
     tryStop () {
 
         console.log('state', this.state, this.members.length());
+        if (this.isError()) {
+            log.warn(`Force stop process.`);
+            return;
+        }
+
         if (this.state === DialerStates.ProcessStop) {
             if (this.members.length() != 0)
                 return;
@@ -918,7 +1020,7 @@ class Member extends EventEmitter2 {
 
         this.score = 0;
 
-        //this.bigData = new Array(1e5).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
+        //this.bigData = new Array(1e4).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
         this.variables = {};
 
         this._data = config;
@@ -1002,6 +1104,7 @@ class Member extends EventEmitter2 {
             return;
         this._currentNumber.state = state;
     }
+
     end (endCause, e) {
         if (this.processEnd) return;
         this.processEnd = true;
@@ -1052,4 +1155,4 @@ class Member extends EventEmitter2 {
         this.log(`end cause: ${endCause || ''}`);
         this.emit('end', this);
     }
-}
+};
