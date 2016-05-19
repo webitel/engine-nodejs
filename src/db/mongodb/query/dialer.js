@@ -99,6 +99,12 @@ function addQuery (db) {
                 .removeOne({_id: new ObjectID(_id), dialer: dialerId}, cb);
         },
 
+        removeMemberByDialerId: function (dialerId, cb) {
+            return db
+                .collection(memberCollectionName)
+                .remove({dialer: dialerId}, cb);
+        },
+
         updateMember: function (_id, dialerId, doc, cb) {
             if (!ObjectID.isValid(_id))
                 return cb(new CodeError(400, 'Bad objectId.'));

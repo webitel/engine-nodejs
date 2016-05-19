@@ -6,6 +6,7 @@
 
 var CodeError = require(__appRoot + '/lib/error'),
     validateCallerParameters = require(__appRoot + '/utils/validateCallerParameters'),
+    log = require(__appRoot + '/lib/log')(module),
     checkPermissions = require(__appRoot + '/middleware/checkPermissions')
     ;
 
@@ -152,9 +153,18 @@ let Service = {
             if (!option.id)
                 return cb(new CodeError(400, 'Bad request: id is required.'));
 
-            let db = application.DB._query.dialer;
+            let db = application.DB._query.dialer,
+                dialerId = option.id;
 
-            return db.removeById(option.id, domain, cb);
+            return db.removeById(dialerId, domain, (err, res) => {
+                if (!err) {
+                    db.removeMemberByDialerId(dialerId, (err) => {
+                        if (err)
+                            log.error(err);
+                    });
+                };
+                return cb && cb(err, res);
+            });
         });
     },
 
