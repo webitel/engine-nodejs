@@ -32,7 +32,7 @@
         "collectionAclPermissions": "aclPermissions",
         "collectionHook": "hook",
         "collectionDialer": "dialer",
-        "collectionDialerMembers": "agentStatusEngine"
+        "collectionDialerMembers": "members"
     },
     "freeSWITCH": {
         "host": "172.17.0.1",
