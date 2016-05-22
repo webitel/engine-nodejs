@@ -231,6 +231,7 @@ class Application extends EventEmitter2 {
 
         wconsole.on('webitel::socket::close', function (e) {
             log.error('Webitel error:', e.toString());
+            scope.emit('sys::wConsoleConnectError');
             setTimeout(function () {
                 scope.connectToWConsole();
             }, waitTimeReconnectConsole);

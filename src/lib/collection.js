@@ -16,7 +16,7 @@ var HashCollection = module.exports = function() {
         } else {
             this.collection[key] = element;
             length++;
-            this.emit('added', element);
+            this.emit('added', element, key);
         };
         return this.collection[key];
     };
