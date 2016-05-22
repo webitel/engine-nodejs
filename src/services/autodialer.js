@@ -92,36 +92,13 @@ function dynamicSort(property) {
     }
 }
 
-var WebitelEvent = function() {
-    var nextSubscriberId = 0;
-    var subscriberList = [];
-
-    this.subscribe = function(callback) {
-        var id = nextSubscriberId;
-        subscriberList[id] = callback;
-        nextSubscriberId++;
-        return id;
-    };
-
-    this.unsubscribe = function(id) {
-        delete subscriberList[id];
-    };
-
-    this.trigger = function(sender) {
-        for (var i in subscriberList) {
-            if (subscriberList[i](sender))
-                break;
-        }
-    };
-};
-
 class Agent {
     constructor (key, state, status) {
         this.id = key;
         this.state = state;
         this.status = status;
         this.dialers = [];
-        this.unLockTime = 0;
+        this.lockTime = 0;
         this.lock = false;
         this.timerId = null;
     }
@@ -129,7 +106,7 @@ class Agent {
     setState (state, status) {
         this.state = state;
         this.status = status;
-        log.trace(`Change agent ${this.id} ${this.state} ${this.status}`);
+        log.trace(`Change agent ${this.id} ${this.state} ${this.status} ${this.lock}`);
     }
 
     addDialer (dialerId) {
@@ -150,32 +127,57 @@ class AgentManager extends EventEmitter2 {
     constructor () {
         super();
         this.agents = new Collection('id');
+        this._keys = [];
+        this.agents.on('added', (a, key) => {
+            if (!~this._keys.indexOf(key))
+                this._keys.push(key);
+
+            if (this.agents.length() == 1 && !this.timerId) {
+                this.tick();
+                log.debug('Start agent manager timer');
+            }
+        });
+        this.agents.on('removed', (a, key) => {
+            let i = this._keys.indexOf(key);
+            if (~i) {
+                this._keys.splice(i, 1);
+            }
+
+            if (this.agents.length() === 0 && this.timerId) {
+                clearTimeout(this.timerId);
+                log.debug('Stop agent manager timer');
+            }
+        });
+        this.timerId = null;
+        this.tick = ()=> {
+            let time = Date.now();
+            for (let key of this._keys) {
+                let agent = this.agents.get(key);
+                if (agent && agent.state === 'ONHOOK' && agent.status === 'NONE' && !agent.lock && agent.lockTime <= time) {
+                    log.debug(`send free agent ${agent.id}`);
+                    this.emit('unReserveHookAgent', agent);
+                }
+            }
+            this.timerId = setTimeout(this.tick, 1500);
+        };
     }
 
     getFreeAgent (agents) {
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
-                if (a && a.state == 'ONHOOK' && a.status == 'NONE' && !a.lock)
+                if (a && a.state == 'ONHOOK' && a.status == 'NONE' && !a.lock &&  a.lockTime <= Date.now())
                     return a;
             }
     }
 
     taskUnReserveAgent (agent, timeSec) {
-        if (agent.timerId)
-            clearTimeout(agent.timerId);
-
-        agent.timerId = setTimeout(() => {
-            this.unReserveAgent(agent);
-            if (agent.state === 'ONHOOK' && agent.status === 'NONE') {
-                this.emit('unReserveHookAgent', agent)
-            }
-        }, timeSec * 1000);
+        agent.lock = false;
+        agent.lockTime = Date.now() + (timeSec * 1000)
     }
     unReserveAgent (agent) {
         agent.lock = false;
-        agent.lockTime = Date.now();
-        this.setAgentStatus(agent, 'ONHOOK');
+        agent.lockTime = 0;
     }
 
     reserveAgent (agent, cb) {
@@ -193,7 +195,8 @@ class AgentManager extends EventEmitter2 {
         application.WConsole.setAccountStatus(agent.id, status, cb);
     }
 
-    initDomain (domainName, cb) {
+    initDomain (domainName, agents, cb) {
+
         accountServices.accountList(ROOT, {domain: domainName}, (err, res) => {
             if (err) {
                 log.error(err);
@@ -201,7 +204,8 @@ class AgentManager extends EventEmitter2 {
             }
             for (let key in res) {
                 let id = key + '@' + domainName;
-                this.agents.add(id, new Agent(id, res[key].state, res[key].status));
+                if (!this.agents.existsKey(id) && ~agents.indexOf(id))
+                    this.agents.add(id, new Agent(id, res[key].state, res[key].status));
             }
             cb(err, res);
         });
@@ -212,6 +216,19 @@ class AgentManager extends EventEmitter2 {
             let a = this.getAgentById(i);
             if (a) {
                 a.addDialer(dialerId)
+            } else {
+                log.warn(`Bad agent id ${i}`)
+            };
+        })
+    }
+
+    removeDialerInAgents (agentsArray, dialerId) {
+        agentsArray.forEach( (i) => {
+            let a = this.getAgentById(i);
+            if (a) {
+                a.removeDialer(dialerId);
+                if (a.dialers.length === 0)
+                    this.agents.remove(i);
             } else {
                 log.warn(`Bad agent id ${i}`)
             };
@@ -276,8 +293,11 @@ module.exports =  class AutoDialer extends EventEmitter2 {
             });
 
             dialer.once('end', (d) => {
-                log.debug(`End dialer ${d.name} - ${d._id}`);
+                log.debug(`End dialer ${d.name} - ${d._id} - ${d.cause}`);
                 clearTimeout(d._taskSleepId);
+                if (dialer.type === DIALER_TYPES.ProgressiveDialer && dialer._agents instanceof Array)
+                    this.agentManager.removeDialerInAgents(dialer._agents, dialer._id);
+
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
                     {$set: {state: d.state, _cause: d.cause, active: false, nextTick: null}},
@@ -306,9 +326,9 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                 this.activeDialer.remove(d._id);
             });
 
-            if (dialer._agents instanceof Array) {
+            if (dialer._agents instanceof Array && dialer.type === DIALER_TYPES.ProgressiveDialer) {
 
-                this.agentManager.initDomain(dialer._domain, (err, res) => {
+                this.agentManager.initDomain(dialer._domain, dialer._agents, (err, res) => {
                     if (err)
                         return log.error(err);
 
@@ -322,7 +342,10 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         });
 
         this.activeDialer.on('removed', (dialer) => {
-            log.info(`Remove active dialer ${dialer.name} : ${dialer._id}`);
+            if (dialer.type === DIALER_TYPES.ProgressiveDialer && dialer._agents instanceof Array)
+                this.agentManager.removeDialerInAgents(dialer._agents, dialer._id);
+
+            log.info(`Remove active dialer ${dialer.name} : ${dialer._id} - ${dialer.cause}`);
         });
     }
 
@@ -342,7 +365,6 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                 agent = this.agentManager.getAgentById(id);
             if (agent) {
                 agent.setState(jEvent['Account-User-State'], jEvent['Account-Status']);
-                this.sendAgentToDialer(agent);
             }
         }
     }
@@ -350,8 +372,8 @@ module.exports =  class AutoDialer extends EventEmitter2 {
     sendAgentToDialer (agent) {
         for (let key of agent.dialers) {
             let d = this.activeDialer.get(key);
-            if (d && !agent.lock && agent.state === 'ONHOOK')
-                d.setAgent(agent);
+            if (d && d.setAgent(agent))
+                break;
         }
     }
 
@@ -515,43 +537,43 @@ class Gw {
     }
 
     // TODO type predictive
-    tryLock (operator, member, predictive) {
+    tryLock (member) {
         if (this.activeLine >= this.maxLines || !member.number)
             return false;
 
         this.activeLine++;
-        let gwString = member.number.replace(this.regex, this.dialString);
 
-        let vars = [`dlr_member_id=${member._id.toString()}`].concat(this._vars);
+        return (agent) => {
+            let gwString = member.number.replace(this.regex, this.dialString);
 
-        if (!member.getVariable('origination_caller_id_number')) {
-            if (!operator) {
-                member.setVariable('origination_caller_id_number', member.queueNumber);
-                member.setVariable('origination_caller_id_name', member.queueName);
-                member.setVariable('origination_callee_id_number', member.number);
-                member.setVariable('origination_callee_id_name', member.name);
-            } else {
-                member.setVariable('origination_callee_id_number', member.number);
-                member.setVariable('origination_caller_id_name', member.name);
+            let vars = [`dlr_member_id=${member._id.toString()}`].concat(this._vars);
+
+            for (let key of member.getVariableKeys()) {
+                vars.push(`${key}='${member.getVariable(key)}'`);
             }
-        }
 
-        for (let key of member.getVariableKeys()) {
-            vars.push(`${key}='${member.getVariable(key)}'`);
-        }
+            if (agent) {
+                vars.push(
+                    `origination_callee_id_number='${agent.id}'`,
+                    `origination_callee_id_name='${agent.id}'`,
+                    `origination_caller_id_number='${member.number}'`,
+                    `origination_caller_id_name='${member.name}'`
+                    //`direction=inbound`
+                    //`w_jsclient_originate_number='${member.number}'`
+                );
+                return `originate {${vars}}user/${agent.id} $bridge(${gwString})`;
+            }
 
-        if (operator && predictive)
-            return `originate {${vars}}${gwString} $park()`;
-
-        if (operator && !predictive) {
-            vars.push('webitel_call_uuid=${create_uuid()}');
-            vars.push('sip_invite_domain=${domain_name}');
-            return `originate {${vars}}user/${operator} $bridge(${gwString})`;
-        }
-
-        vars.push(`dlr_queue=${member._queueId}`);
-        vars.push(`origination_uuid=${member.sessionId}`);
-        return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
+            vars.push(
+                `dlr_queue=${member._queueId}`,
+                `origination_uuid=${member.sessionId}`,
+                `origination_caller_id_number='${member.queueNumber}'`,
+                `origination_caller_id_name='${member.queueName}'`,
+                `origination_callee_id_number='${member.number}'`,
+                `origination_callee_id_name='${member.name}'`
+            );
+            return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
+        };
     }
 
     unLock () {
@@ -616,7 +638,7 @@ class Router extends EventEmitter2 {
         }
     }
 
-    getDialStringFromMember (operator, member) {
+    getDialStringFromMember (member) {
         let res = {
             found: false,
             dialString: false,
@@ -637,7 +659,7 @@ class Router extends EventEmitter2 {
                     if (~this._lockedGateways.indexOf(gatewayPositionMap))
                         continue; // Next gw check
 
-                    res.dialString = this._resourcePaterns[i].gws[j].tryLock(operator, member);
+                    res.dialString = this._resourcePaterns[i].gws[j].tryLock(member);
                     if (res.dialString) {
                         res.patternIndex = i; // Ok gw
                         res.gw = j;
@@ -816,19 +838,21 @@ class Dialer extends Router {
         dialMember[DIALER_TYPES.VoiceBroadcasting] = function (member) {
 
             log.trace(`try call ${member.sessionId}`);
-            let gw = this.getDialStringFromMember(null, member);
+            let gw = this.getDialStringFromMember(member);
 
-            member.log(`dialString: ${gw.dialString}`);
 
             if (gw.found) {
                 if (gw.dialString) {
+                    let ds = gw.dialString();
+                    member.log(`dialString: ${ds}`);
 
                     let onChannelHangup = function (e) {
+                        this.freeGateway(gw);
                         let recordSec = +e.getHeader('variable_record_seconds');
                         if (recordSec)
                             member.setRecordSession(recordSec);
                         member.end(e.getHeader('variable_hangup_cause'));
-                    };
+                    }.bind(this);
 
                     member.offEslEvent = function () {
                         application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
@@ -836,14 +860,13 @@ class Dialer extends Router {
 
                     application.Esl.once(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelHangup);
 
-                    log.trace(`Call ${gw.dialString}`);
+                    log.trace(`Call ${ds}`);
 
-                    application.Esl.bgapi(gw.dialString, (res) => {
-
-                        this.freeGateway(gw);
+                    application.Esl.bgapi(ds, (res) => {
 
                         if (/^-ERR/.test(res.body)) {
                             member.offEslEvent();
+                            this.freeGateway(gw);
                             let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                             member.end(error);
                         }
@@ -863,6 +886,9 @@ class Dialer extends Router {
         }.bind(this);
 
         if (this.type === DIALER_TYPES.ProgressiveDialer) {
+            if (this._limit > this._agents.length) {
+                this._limit = this._agents.length;
+            }
             let getMembersFromEvent = (e) => {
                 return this.members.get(e.getHeader('variable_dlr_member_id'))
             };
@@ -872,9 +898,10 @@ class Dialer extends Router {
             application.Esl.on('esl::event::CHANNEL_DESTROY::*', (e) => {
                 let m = getMembersFromEvent(e);
                 if (m && --m.channelsCount === 0) {
+
                     this.freeGateway(m._gw);
                     this._am.taskUnReserveAgent(m._agent, 5);
-
+                    log.trace(`End channels ${m.sessionId}`);
                     let recordSec = +e.getHeader('variable_record_seconds');
                     if (recordSec)
                         m.setRecordSession(recordSec);
@@ -891,12 +918,12 @@ class Dialer extends Router {
         dialMember[DIALER_TYPES.ProgressiveDialer] = function (member) {
             log.trace(`try call ${member.sessionId}`);
 
-            let gw = this.getDialStringFromMember('#AGENT#', member);
+            let gw = this.getDialStringFromMember(member);
             if (gw.found) {
                 if (gw.dialString) {
                     this.findAvailAgents( (agent) => {
                         member.log(`set agent: ${agent.id}`);
-                        let ds = gw.dialString.replace(/#AGENT#/, agent.id);
+                        let ds = gw.dialString(agent);
                         member._gw = gw;
                         member._agent = agent;
 
@@ -905,16 +932,19 @@ class Dialer extends Router {
                         };
 
                         log.trace(`Call ${ds}`);
-
+                        member.inCall = true;
                         application.Esl.bgapi(ds, (res) => {
                             log.trace(`fs response: ${res && res.body}`);
                             if (/^-ERR/.test(res.body)) {
                                 member.offEslEvent();
                                 this.freeGateway(gw);
-                                this._am.unReserveAgent(agent);
-
                                 let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
-                                member.end(error);
+                                member.log(`agent: ${error}`);
+                                member.minusProbe();
+                                this.nextTrySec = 0;
+                                member.end();
+
+                                this._am.taskUnReserveAgent(agent, 0);
                             }
                         });
                     });
@@ -1067,8 +1097,8 @@ class Dialer extends Router {
     }
 
     setReady () {
-        if (typeof this.reserveMember !== 'function' || typeof this.dialMember !== 'function' || typeof this.unReserveMember !== 'function') {
-            this.cause = `Not implement ${this.type}`;
+        if ( typeof this.dialMember !== 'function') {
+            this.cause = `Not implement IGOR ${this.type}`;
             this.setState(DialerStates.End);
             this.emit('end', this);
             return log.error(`Bad dialer ${this._id} type ${this.type}`);
@@ -1176,6 +1206,15 @@ class Dialer extends Router {
         }
 
         if (this.state === DialerStates.ProcessStop) {
+            let mKeys = this.members.getKeys();
+            for (let key of mKeys) {
+                let m = this.members.get(key)
+                if (m && m.channelsCount === 0) {
+                    //m.minusProbe();
+                    m.end();
+                }
+            }
+
             if (this.members.length() != 0)
                 return;
 
@@ -1236,6 +1275,8 @@ class Dialer extends Router {
     }
 
     setAgent (agent) {
+        if (this._agentReserveCallback.length === 0 || !this.isReady())
+            return false;
         this._am.reserveAgent(agent, (err) => {
             if (err) {
                 return log.error(err);
@@ -1243,7 +1284,8 @@ class Dialer extends Router {
             var fn = this._agentReserveCallback.shift();
             if(fn && typeof fn === 'function')
                 fn(agent);
-        })
+        });
+        return true;
     }
 
     findAvailAgents (cb) {
@@ -1308,6 +1350,7 @@ class Member extends EventEmitter2 {
 
         this.bigData = new Array(1e4).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
         this.variables = {};
+        this.inCall = false;
 
         this._data = config;
         this.name = config.name || "";

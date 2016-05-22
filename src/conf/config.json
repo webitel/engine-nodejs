@@ -88,7 +88,7 @@
         "scheduleHour": 5
     },
     "broker": {
-        "connectionString": "amqp://webitel:secret@pre.webitel.com:5672?heartbeat=0",
+        "connectionString": "esl://webitel:ClueCon@pre.webitel.com:8021",
         "config": {
             "eventsExchange": {
                 "channel": "TAP.Events",
