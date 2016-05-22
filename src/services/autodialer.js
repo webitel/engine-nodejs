@@ -145,6 +145,7 @@ class AgentManager extends EventEmitter2 {
 
             if (this.agents.length() === 0 && this.timerId) {
                 clearTimeout(this.timerId);
+                this.timerId = null;
                 log.debug('Stop agent manager timer');
             }
         });
@@ -536,7 +537,6 @@ class Gw {
         this.dialString = conf.gwProto == 'sip' && conf.gwName ? `sofia/gateway/${conf.gwName}/${conf.dialString}` : conf.dialString;
     }
 
-    // TODO type predictive
     tryLock (member) {
         if (this.activeLine >= this.maxLines || !member.number)
             return false;
@@ -1098,7 +1098,7 @@ class Dialer extends Router {
 
     setReady () {
         if ( typeof this.dialMember !== 'function') {
-            this.cause = `Not implement IGOR ${this.type}`;
+            this.cause = `Not implement ${this.type}`;
             this.setState(DialerStates.End);
             this.emit('end', this);
             return log.error(`Bad dialer ${this._id} type ${this.type}`);
