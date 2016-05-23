@@ -770,7 +770,6 @@ class Dialer extends Router {
         this._objectId = config._id;
         this._am = agentManager;
 
-        // TODO Delete :)
         //this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.name = config.name;
