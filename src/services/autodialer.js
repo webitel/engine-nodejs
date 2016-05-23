@@ -32,12 +32,6 @@ const DIALER_TYPES = {
     ProgressiveDialer: "Progressive Dialer"
 };
 
-//TODO
-const ROOT = {
-    roleName: "root",
-    domain: null
-};
-
 function addTimeToDate(time) {
     return new Date(Date.now() + time)
 }
@@ -115,13 +109,15 @@ class Agent {
         this.maxNoAnswer = +(params.max_no_answer || 0);
         this.wrapUpTime = +(params.wrap_up_time || 10);
         this.rejectDelayTime = +(params.reject_delay_time || 0);
-        this.callTimeout = (params.contact && /originate_timeout=([^,|}]*)/.exec(params.contact)[1]) || 10;
-        //str && /originate_timeout=([^,|}]*)/.exec(str)[1]
+        let cTimeout = params.contact && /originate_timeout=([^,|}]*)/.exec(params.contact);
+        this.callTimeout = (cTimeout && cTimeout[1]) || 10;
         this.dialers = [];
         this.lockTime = 0;
         this.unIdleTime = 0;
         this.lock = false;
         this.timerId = null;
+
+        this._noAnswer = 0;
     }
 
     setStatus (status) {
@@ -344,7 +340,7 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                             log.error(err);
                         this.activeDialer.remove(dialer._id);
                     }
-                )
+                );
             });
 
             dialer.on('sleep', (d) => {
@@ -763,7 +759,7 @@ class Dialer extends Router {
         this._limit = MAX_MEMBER_RETRY;
         this._maxTryCount = 5;
         this._intervalTryCount = 5;
-        this._minCallSec = 10;
+        this._minBillSec = 10;
         this._timerId = null;
         this._domain = config.domain;
         this._calendar = calendarConfig;
@@ -791,16 +787,6 @@ class Dialer extends Router {
         this._setResource(config.resources);
 
         this.type = config.type;
-
-        log.debug(`
-            Init dialer: ${this.name}@${this._domain}
-            Config:
-                type: ${this.type}
-                limit: ${this._limit},
-                minCallSec: ${this._minCallSec},
-                maxTryCount: ${this._maxTryCount},
-                intervalTryCount: ${this._intervalTryCount}
-        `);
         
         this.findMaxTryTime = function (cb) {
             //$elemMatch: {
@@ -891,6 +877,7 @@ class Dialer extends Router {
 
                     let onChannelHangup = function (e) {
                         this.freeGateway(gw);
+                        member.channelsCount--;
                         let recordSec = +e.getHeader('variable_record_seconds');
                         if (recordSec)
                             member.setRecordSession(recordSec);
@@ -913,6 +900,7 @@ class Dialer extends Router {
                             let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                             member.end(error);
                         }
+                        member.channelsCount++;
 
                     });
                 } else {
@@ -936,9 +924,12 @@ class Dialer extends Router {
                 return this.members.get(e.getHeader('variable_dlr_member_id'))
             };
 
-            application.Esl.subscribe(['CHANNEL_CREATE', 'CHANNEL_DESTROY']);
-
-            application.Esl.on('esl::event::CHANNEL_DESTROY::*', (e) => {
+            let onChannelCreate = (e) => {
+                let m = getMembersFromEvent(e);
+                if (m)
+                    m.channelsCount++;
+            };
+            let onChannelDestroy = (e) => {
                 let m = getMembersFromEvent(e);
                 if (m && --m.channelsCount === 0) {
 
@@ -948,14 +939,19 @@ class Dialer extends Router {
                     let recordSec = +e.getHeader('variable_record_seconds');
                     if (recordSec)
                         m.setRecordSession(recordSec);
-                    m.end(e.getHeader('variable_hangup_cause'));
+                    m.end(e.getHeader('variable_hangup_cause'), e);
                 }
+            };
+
+            this.once('end', ()=> {
+                log.debug('Off channel events');
+                application.Esl.off('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
+                application.Esl.off('esl::event::CHANNEL_CREATE::*', onChannelCreate);
             });
-            application.Esl.on('esl::event::CHANNEL_CREATE::*', (e) => {
-                let m = getMembersFromEvent(e);
-                if (m)
-                    m.channelsCount++;
-            });
+            application.Esl.subscribe(['CHANNEL_CREATE', 'CHANNEL_DESTROY']);
+
+            application.Esl.on('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
+            application.Esl.on('esl::event::CHANNEL_CREATE::*', onChannelCreate);
         }
 
         dialMember[DIALER_TYPES.ProgressiveDialer] = function (member) {
@@ -1051,6 +1047,16 @@ class Dialer extends Router {
             if (!this.checkLimit())
                 this.getNextMember();
         });
+
+        log.debug(`
+            Init dialer: ${this.name}@${this._domain}
+            Config:
+                type: ${this.type}
+                limit: ${this._limit},
+                minBillSec: ${this._minBillSec},
+                maxTryCount: ${this._maxTryCount},
+                intervalTryCount: ${this._intervalTryCount}
+        `);
     }
 
     toJson () {
@@ -1075,6 +1081,7 @@ class Dialer extends Router {
         let expireCb = function () {
             this.cause = DialerCauses.ProcessExpire;
             this.state = DialerStates.End;
+            this.emit('end', this);
         }.bind(this);
 
 
@@ -1114,7 +1121,7 @@ class Dialer extends Router {
         if (calendar.startDate && currentTime < calendar.startDate) {
             this.setSleepStatus(new Date(calendar.startDate).getTime() - Date.now() + 1);
             return false;
-        } else if (calendar && currentTime > calendar) {
+        } else if (calendar && currentTime > calendar.endDate) {
             expireCb();
             return false
         }
@@ -1148,13 +1155,29 @@ class Dialer extends Router {
         } else {
             log.trace(`Init dialer ${this.name} - ${this._id} type ${this.type}`);
         }
-        this.initCalendar();
-        if (this.state !== DialerStates.Idle)
-            return;
-        this.cause = DialerCauses.ProcessReady;
-        this.state = DialerStates.Work;
-        this.emit('ready', this);
-        this.getNextMember();
+        this.findMaxTryTime((err, res) => {
+            if (err) {
+                log.error(err);
+                this.cause = `${err.message}`;
+                this.emit('end', this);
+                return;
+            }
+
+            if (!res || res.count === 0) {
+                this.cause = DialerCauses.ProcessNotFoundMember;
+                this.emit('end', this);
+                return;
+            }
+
+            this.initCalendar();
+
+            if (this.state !== DialerStates.Idle)
+                return;
+            this.cause = DialerCauses.ProcessReady;
+            this.state = DialerStates.Work;
+            this.emit('ready', this);
+            this.getNextMember();
+        });
     }
 
     checkLimit () {
@@ -1179,10 +1202,22 @@ class Dialer extends Router {
             return;
         }
 
-        if (state === DialerStates.ProcessStop && this.members.length() === 0) {
-            this.cause = DialerCauses.ProcessStop;
-            this.emit('end', this);
-        };
+        if (state === DialerStates.ProcessStop) {
+            if (this.members.length() === 0) {
+                this.cause = DialerCauses.ProcessStop;
+                this.emit('end', this)
+            } else {
+                let mKeys = this.members.getKeys();
+                for (let key of mKeys) {
+                    let m = this.members.get(key);
+                    // TODO error...
+                    if (m && m.channelsCount === 0) {
+                        //m.minusProbe();
+                        m.end();
+                    }
+                }
+            }
+        }
     }
 
     isReady () {
@@ -1249,15 +1284,6 @@ class Dialer extends Router {
         }
 
         if (this.state === DialerStates.ProcessStop) {
-            let mKeys = this.members.getKeys();
-            for (let key of mKeys) {
-                let m = this.members.get(key)
-                if (m && m.channelsCount === 0) {
-                    //m.minusProbe();
-                    m.end();
-                }
-            }
-
             if (this.members.length() != 0)
                 return;
 
