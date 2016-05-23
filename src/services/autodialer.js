@@ -225,6 +225,7 @@ class AgentManager extends EventEmitter2 {
     }
 
     setAgentStatus (agent, status, cb) {
+        // TODO if err remove agent ??
         ccService._setAgentState(agent.id, status, cb);
     }
 
@@ -340,7 +341,7 @@ module.exports =  class AutoDialer extends EventEmitter2 {
 
                 this.collection.dialer.findOneAndUpdate(
                     {_id: d._objectId},
-                    {$set: {state: d.state, _cause: d.cause, active: false, nextTick: null}},
+                    {$set: {state: d.state, _cause: d.cause, active: d.state === DialerStates.Sleep}},
                     (err, res) => {
                         if (err)
                             log.error(err);
@@ -358,7 +359,7 @@ module.exports =  class AutoDialer extends EventEmitter2 {
                             log.error(err);
                     }
                 );
-                this.addTask(d);
+                this.addTask(d._id, d._domain, dialer._sleepNextTry);
             });
 
             dialer.on('error', (d) => {
@@ -454,19 +455,19 @@ module.exports =  class AutoDialer extends EventEmitter2 {
         return this.connectDb === true && this.connectFs === true;
     }
 
-    addTask (dialer) {
-        log.info(`Dialer ${dialer.name}@${dialer._domain} next try ${new Date(Date.now() + dialer._sleepNextTry)}`);
-        clearTimeout(dialer._taskSleepId);
+    addTask (dialerId, domain, time) {
+        if (!time)
+            time = 1000;
+        log.info(`Dialer ${dialerId}@${domain} next try ${new Date(Date.now() + time)}`);
 
-        dialer._taskSleepId = setTimeout(() => {
+        setTimeout(() => {
             if (!this.isReady()) {
                 // sleep recovery min
-                dialer._sleepNextTry = 60 * 1000;
-                this.addTask(dialer);
+                this.addTask(dialerId, domain, 60 * 1000);
             }
 
-            dialer.setReady()
-        }, dialer._sleepNextTry);
+            this.runDialerById(dialerId, domain, () => {})
+        }, time);
     }
 
     loadCampaign () {
@@ -496,10 +497,22 @@ module.exports =  class AutoDialer extends EventEmitter2 {
 
     stopDialerById (id, domain, cb) {
         let dialer = this.activeDialer.get(id);
-        if (!dialer)
-            return cb(new Error("Not found"));
-        dialer.setState(DialerStates.ProcessStop);
-        return cb(null, dialer.toJson());
+        if (!dialer) {
+            if (ObjectID.isValid(id))
+                id = new ObjectID(id);
+            this.collection.dialer.findOneAndUpdate(
+                {_id: id},
+                {$set: {active: false, state: DialerStates.ProcessStop, _cause: DialerCauses.ProcessStop}},
+                (err, res) => {
+                    if (err)
+                        return cb(err)
+                    return cb(null,  {state: DialerStates.ProcessStop, members: 0})
+                }
+            );
+        } else {
+            dialer.setState(DialerStates.ProcessStop);
+            return cb(null, dialer.toJson());
+        }
     }
 
     runDialerById(id, domain, cb) {
@@ -1076,7 +1089,6 @@ class Dialer extends Router {
         this.cause = DialerCauses.ProcessSleep;
         this.state = DialerStates.Sleep;
         this._sleepNextTry = sleepTime;
-        this.emit('sleep', this);
     }
 
     initCalendar () {
@@ -1146,9 +1158,18 @@ class Dialer extends Router {
     }
 
     checkSleep () {
-        if (Date.now() >= this._calendarMap.deadLineTime && this.state !== DialerStates.Sleep) {
-            this.initCalendar();
-            this.setState(DialerStates.Sleep);
+        if (Date.now() >= this._calendarMap.deadLineTime) {
+            if (this.state !== DialerStates.Sleep) {
+                this.initCalendar();
+                this.setState(DialerStates.Sleep);
+            }
+        }
+        if (this.state === DialerStates.Sleep) {
+            this._closeNoChannelsMembers();
+            if (this.members.length() === 0) {
+                this.emit('sleep', this);
+                this.emit('end', this);
+            }
         }
     }
 
@@ -1213,16 +1234,20 @@ class Dialer extends Router {
                 this.cause = DialerCauses.ProcessStop;
                 this.emit('end', this)
             } else {
-                let mKeys = this.members.getKeys();
-                for (let key of mKeys) {
-                    let m = this.members.get(key);
-                    // TODO error...
-                    if (m && m.channelsCount === 0) {
-                        if (m.currentProbe > 0)
-                            m.minusProbe();
-                        m.end();
-                    }
-                }
+                this._closeNoChannelsMembers();
+            }
+        }
+    }
+
+    _closeNoChannelsMembers () {
+        let mKeys = this.members.getKeys();
+        for (let key of mKeys) {
+            let m = this.members.get(key);
+            // TODO error...
+            if (m && m.channelsCount === 0) {
+                if (m.currentProbe > 0)
+                    m.minusProbe();
+                m.end();
             }
         }
     }
@@ -1232,7 +1257,7 @@ class Dialer extends Router {
     }
 
     getNextMember () {
-        log.trace(`find next members in ${this.name} - members queue: ${this.members.length()}`);
+        log.trace(`find next members in ${this.name} - members queue: ${this.members.length()} state: ${this.state}`);
 
         if (!this.isReady())
             this.tryStop();
@@ -1351,6 +1376,8 @@ class Dialer extends Router {
     }
 
     setAgent (agent) {
+        // TODO
+        this.checkSleep();
         if (this._agentReserveCallback.length === 0 || !this.isReady())
             return false;
         this._am.reserveAgent(agent, (err) => {
