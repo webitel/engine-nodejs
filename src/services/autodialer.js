@@ -265,8 +265,14 @@ class AgentManager extends EventEmitter2 {
             let a = this.getAgentById(i);
             if (a) {
                 a.removeDialer(dialerId);
-                if (a.dialers.length === 0)
+                if (a.dialers.length === 0) {
                     this.agents.remove(i);
+                    if (a.state === AgentState.Idle && a.unIdleTime !== 0)
+                        this.setAgentStatus(a, AgentState.Waiting, (err) => {
+                            if (err)
+                                log.error(err);
+                        })
+                }
             } else {
                 log.warn(`Bad agent id ${i}`)
             };
@@ -1212,7 +1218,8 @@ class Dialer extends Router {
                     let m = this.members.get(key);
                     // TODO error...
                     if (m && m.channelsCount === 0) {
-                        //m.minusProbe();
+                        if (m.currentProbe > 0)
+                            m.minusProbe();
                         m.end();
                     }
                 }
