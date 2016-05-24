@@ -155,11 +155,12 @@ var Indexes = {
         },
         {
             "_unique": true,
+            "_name": "number_unique",
             "_": {
-                "communications.number" : 1
+                "communications.number" : 1,
+                "dialer": 1
             }
         },
-
         {
             "_name": "hunting",
             "_": {

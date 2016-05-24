@@ -117,6 +117,7 @@ let Service = {
                 return cb(new CodeError(400, "Bad request options"));
 
             let domain = validateCallerParameters(caller, option['domain']);
+
             if (!domain) {
                 return cb(new CodeError(400, 'Bad request: domain is required.'));
             }
@@ -124,6 +125,15 @@ let Service = {
 
             let dialer = option;
             dialer.domain = domain;
+
+            if (!dialer.name)
+                return cb(new CodeError(400, "Name is required"));
+
+            if (!dialer.type)
+                return cb(new CodeError(400, "Type is required"));
+
+            if (!dialer.calendar || !dialer.calendar.id)
+                return cb(new CodeError(400, "Calendar is required"));
 
             let db = application.DB._query.dialer;
 
@@ -311,6 +321,8 @@ let Service = {
 
                 let member = option.data;
                 member.dialer = option.dialer;
+                member.createdOn = Date.now();
+                member._score = member.createdOn + (member.priority || 0);
 
                 let db = application.DB._query.dialer;
                 return db.createMember(member, cb);
@@ -341,6 +353,9 @@ let Service = {
                 if (!domain) {
                     return cb(new CodeError(400, 'Bad request: domain is required.'));
                 };
+
+                if (option.data.createdOn)
+                    option.data._score = option.data.createdOn + (option.data.priority || 0);
 
                 let db = application.DB._query.dialer;
                 return db.updateMember(option.id, option.dialer, option.data, cb);

@@ -21,8 +21,8 @@ const END_CAUSE = {
     ACCEPT: "ACCEPT"
 };
 
-const CODE_RESPONSE_ERRORS = ["NORMAL_TEMPORARY_FAILURE", END_CAUSE.NO_ROUTE, 'CHAN_NOT_IMPLEMENTED', "CALL_REJECTED", "INVALID_NUMBER_FORMAT", "NETWORK_OUT_OF_ORDER", "NORMAL_TEMPORARY_FAILURE", "OUTGOING_CALL_BARRED", "SERVICE_UNAVAILABLE", "CHAN_NOT_IMPLEMENTED", "SERVICE_NOT_IMPLEMENTED", "INCOMPATIBLE_DESTINATION", "MANDATORY_IE_MISSING", "PROGRESS_TIMEOUT", "GATEWAY_DOWN"];
-const CODE_RESPONSE_RETRY = ["UNALLOCATED_NUMBER", "NO_ROUTE_DESTINATION", "USER_BUSY", "NO_USER_RESPONSE", "NO_ANSWER", "SUBSCRIBER_ABSENT", "NUMBER_CHANGED", "NORMAL_UNSPECIFIED", "NORMAL_CIRCUIT_CONGESTION", "ORIGINATOR_CANCEL", "LOSE_RACE", "USER_NOT_REGISTERED"];
+const CODE_RESPONSE_ERRORS = ["UNALLOCATED_NUMBER", "NORMAL_TEMPORARY_FAILURE", END_CAUSE.NO_ROUTE, 'CHAN_NOT_IMPLEMENTED', "CALL_REJECTED", "INVALID_NUMBER_FORMAT", "NETWORK_OUT_OF_ORDER", "NORMAL_TEMPORARY_FAILURE", "OUTGOING_CALL_BARRED", "SERVICE_UNAVAILABLE", "CHAN_NOT_IMPLEMENTED", "SERVICE_NOT_IMPLEMENTED", "INCOMPATIBLE_DESTINATION", "MANDATORY_IE_MISSING", "PROGRESS_TIMEOUT", "GATEWAY_DOWN"];
+const CODE_RESPONSE_RETRY = ["NO_ROUTE_DESTINATION", "USER_BUSY", "NO_USER_RESPONSE", "NO_ANSWER", "SUBSCRIBER_ABSENT", "NUMBER_CHANGED", "NORMAL_UNSPECIFIED", "NORMAL_CIRCUIT_CONGESTION", "ORIGINATOR_CANCEL", "LOSE_RACE", "USER_NOT_REGISTERED"];
 const CODE_RESPONSE_OK = ["NORMAL_CLEARING"];
 
 const MAX_MEMBER_RETRY = 999;
@@ -152,7 +152,7 @@ class AgentManager extends EventEmitter2 {
         this.agents.on('added', (a, key) => {
             if (!~this._keys.indexOf(key))
                 this._keys.push(key);
-
+            log.trace('add agent: ', a);
             if (this.agents.length() == 1 && !this.timerId) {
                 this.tick();
                 log.debug('Start agent manager timer');
@@ -591,17 +591,12 @@ class Gw {
         this.dialString = conf.gwProto == 'sip' && conf.gwName ? `sofia/gateway/${conf.gwName}/${conf.dialString}` : conf.dialString;
     }
 
-    tryLock (member) {
-        if (this.activeLine >= this.maxLines || !member.number)
-            return false;
-
-        this.activeLine++;
-
+    fnDialString (member) {
         return (agent) => {
             let gwString = member.number.replace(this.regex, this.dialString);
 
-            let vars = [`dlr_member_id=${member._id.toString()}`].concat(this._vars);
-
+            let vars = [`dlr_member_id=${member._id.toString()}`, `cc_queue=${member.queueName}`].concat(this._vars);
+            // TODO cc_queue
             for (let key of member.getVariableKeys()) {
                 vars.push(`${key}='${member.getVariable(key)}'`);
             }
@@ -614,9 +609,9 @@ class Gw {
                     `origination_caller_id_name='${member.name}'`,
                     `destination_number=${member.number}`,
                     `originate_timeout=${agent.callTimeout}`
-                    //`w_jsclient_originate_number='${member.number}'`
                 );
-                return `originate {${vars}}user/${agent.id} &bridge(${gwString})`;
+                // `originate {${vars}}user/${agent.id} &bridge(${gwString})`; <-- prev
+                return `originate {${vars}}user/${agent.id} 'set_user:${agent.id},transfer:${member.number}' inline`;
             }
 
             vars.push(
@@ -629,6 +624,15 @@ class Gw {
             );
             return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
         };
+    }
+
+    tryLock (member) {
+        if (this.activeLine >= this.maxLines || !member.number)
+            return false;
+
+        this.activeLine++;
+
+        return this.fnDialString(member)
     }
 
     unLock () {
@@ -645,8 +649,10 @@ class Router extends EventEmitter2 {
     _setResource (resources) {
         this._resourcePaterns = [];
         this._lockedGateways = [];
+        // TODO
+        this._progressGw = new Gw({}, null, this._variables);
 
-        if (resources instanceof Array) {
+        if (resources instanceof Array && this.type === DIALER_TYPES.VoiceBroadcasting) {
 
             var maxLimitGw = 0;
             resources.forEach((resource) => {
@@ -701,6 +707,13 @@ class Router extends EventEmitter2 {
             patternIndex: null,
             gw: null
         };
+
+        if (this.type === DIALER_TYPES.ProgressiveDialer) {
+            res.found = true;
+            res.dialString = this._progressGw.fnDialString(member);
+            return res
+        }
+
         for (let i = 0, len = this._resourcePaterns.length; i < len; i++) {
             if (this._resourcePaterns[i].regexp.test(member.number)) {
                 res.found = true;
@@ -801,10 +814,9 @@ class Dialer extends Router {
 
         this._variables = config.variables || {};
         this._variables.domain_name = config.domain;
+        this.type = config.type;
 
         this._setResource(config.resources);
-
-        this.type = config.type;
         
         this.findMaxTryTime = function (cb) {
             //$elemMatch: {
@@ -899,7 +911,7 @@ class Dialer extends Router {
                         let recordSec = +e.getHeader('variable_record_seconds');
                         if (recordSec)
                             member.setRecordSession(recordSec);
-                        member.end(e.getHeader('variable_hangup_cause'));
+                        member.end(e.getHeader('variable_hangup_cause'), e);
                     }.bind(this);
 
                     member.offEslEvent = function () {
@@ -951,7 +963,6 @@ class Dialer extends Router {
                 let m = getMembersFromEvent(e);
                 if (m && --m.channelsCount === 0) {
 
-                    this.freeGateway(m._gw);
                     this._am.taskUnReserveAgent(m._agent, m._agent.wrapUpTime);
                     log.trace(`End channels ${m.sessionId}`);
                     let recordSec = +e.getHeader('variable_record_seconds');
@@ -994,7 +1005,6 @@ class Dialer extends Router {
                             log.trace(`fs response: ${res && res.body}`);
                             if (/^-ERR/.test(res.body)) {
                                 member.offEslEvent();
-                                this.freeGateway(gw);
                                 let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                                 member.log(`agent: ${error}`);
                                 member.minusProbe();
@@ -1095,6 +1105,7 @@ class Dialer extends Router {
             deadLineTime: 0
         };
         let calendar = this._calendar;
+
         let expireCb = function () {
             this.cause = DialerCauses.ProcessExpire;
             this.state = DialerStates.End;
@@ -1138,7 +1149,7 @@ class Dialer extends Router {
         if (calendar.startDate && currentTime < calendar.startDate) {
             this.setSleepStatus(new Date(calendar.startDate).getTime() - Date.now() + 1);
             return false;
-        } else if (calendar && currentTime > calendar.endDate) {
+        } else if (calendar.endDate && calendar && currentTime > calendar.endDate) {
             expireCb();
             return false
         }
@@ -1294,7 +1305,8 @@ class Dialer extends Router {
                 lockedGateways: this._lockedGateways,
                 queueId: this._id,
                 queueName: this.name,
-                queueNumber: this.number
+                queueNumber: this.number,
+                minCallDuration: this._minBillSec
             };
             let m = new Member(res.value, option);
             this.members.add(m._id, m);
@@ -1430,6 +1442,7 @@ class Member extends EventEmitter2 {
 
         this.tryCount = option.maxTryCount;
         this.nextTrySec = option.intervalTryCount;
+        this.minCallDuration = option.minCallDuration;
 
         this.queueName = option.queueName ;
         this._queueId = option.queueId;
@@ -1543,16 +1556,23 @@ class Member extends EventEmitter2 {
 
         log.trace(`end member ${this._id} cause: ${this.endCause || endCause || ''}`) ;
 
-
+        let skipOk = false,
+            billSec = e && +e.getHeader('variable_billsec');
         if (~CODE_RESPONSE_OK.indexOf(endCause)) {
-            this.endCause = endCause;
-            this.log(`OK: ${endCause}`);
-            this._setStateCurrentNumber(MemberState.End);
-            this.emit('end', this);
-            return;
+            if (billSec >= this.minCallDuration) {
+                this.endCause = endCause;
+                this.log(`OK: ${endCause}`);
+                this._setStateCurrentNumber(MemberState.End);
+                this.emit('end', this);
+                return;
+            } else {
+                skipOk = true;
+                this.log(`skip ok: bill sec ${billSec}`)
+            }
+
         }
 
-        if (~CODE_RESPONSE_RETRY.indexOf(endCause)) {
+        if (~CODE_RESPONSE_RETRY.indexOf(endCause) || skipOk) {
             if (this.currentProbe >= this.tryCount) {
                 this.log(`max try count`);
                 this.endCause = END_CAUSE.MAX_TRY;
