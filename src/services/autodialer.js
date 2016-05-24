@@ -196,7 +196,6 @@ class AgentManager extends EventEmitter2 {
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
-                if (a.lock)
                 if (a && a.state === AgentState.Waiting && a.status === AgentStatus.Available && !a.lock &&  a.lockTime <= Date.now()) {
                     return a;
                 }
