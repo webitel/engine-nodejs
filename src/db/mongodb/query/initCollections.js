@@ -153,6 +153,12 @@ var Indexes = {
         {
             "priority" : 1
         },
+        {
+            "_unique": true,
+            "_": {
+                "communications.number" : 1
+            }
+        },
 
         {
             "_name": "hunting",
