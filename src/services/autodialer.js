@@ -578,7 +578,7 @@ class Gw {
         this.regex = regex;
         this.maxLines = conf.limit || 0;
         this.gwName = conf.gwName;
-
+        this._vars = [];
         if (variables) {
             let arr = [];
             for (let key in variables)
