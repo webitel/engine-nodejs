@@ -133,6 +133,71 @@ function addQuery (db) {
             return db
                 .collection(memberCollectionName)
                 .aggregate(query, cb);
+        },
+        
+        _updateDialer: function (_id, state, cause, active, nextTick, cb) {
+            if (!ObjectID.isValid(_id))
+                return cb(new CodeError(400, 'Bad objectId.'));
+
+            if (typeof _id == 'string') {
+                _id = new ObjectID(_id);
+            }
+            return db
+                .collection(dialerCollectionName)
+                .findOneAndUpdate(
+                {_id: _id},
+                {$set: {state: state, _cause: cause, active: active === true, nextTick: nextTick}},
+                cb
+            );
+        },
+
+        _getActiveDialer: function (cb) {
+            return db
+                .collection(dialerCollectionName)
+                .find({
+                    active: true
+                })
+                .toArray(cb)
+        },
+        
+        _getDialerById: function (id, domain, cb) {
+            if (typeof id === 'string' && ObjectID.isValid(id)) {
+                id = new ObjectID(id);
+            }
+
+            return db
+                .collection(dialerCollectionName)
+                .findOne({_id: new ObjectID(id), domain: domain}, cb);
+        },
+        
+        _updateLockedMembers: function (id, lockId, cause, cb) {
+            return db
+                .collection(memberCollectionName)
+                .update(
+                    {dialer: id, _lock: lockId},
+                    {$set: {_endCause: cause}, $unset: {_lock: null}}, {multi: true},
+                    cb
+                )
+        },
+        
+        _updateMember: function (filter, doc, sort, cb) {
+            return db
+                .collection(memberCollectionName)
+                .findOneAndUpdate(
+                    filter,
+                    doc,
+                    sort,
+                    cb
+                )
+        },
+        
+        _aggregateMembers: function (agg, cb) {
+            return db
+                .collection(memberCollectionName)
+                .aggregate(
+                    agg,
+                    cb
+                )
         }
     }
 }

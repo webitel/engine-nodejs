@@ -411,12 +411,28 @@ let Service = {
                 let domain = validateCallerParameters(caller, option['domain']);
                 if (!domain) {
                     return cb(new CodeError(400, 'Bad request: domain is required.'));
-                };
+                }
 
                 let db = application.DB._query.dialer;
                 return db.aggregateMembers(option.dialer, option.data, cb);
 
             });
+        },
+
+
+        _updateById: (id, doc, cb) => {
+            let db = application.DB._query.dialer;
+            return db._updateMember({_id: id}, doc, null, cb);
+        },
+
+        _updateMember (filter, doc, sort, cb) {
+            let db = application.DB._query.dialer;
+            return db._updateMember(filter, doc, sort, cb);
+        },
+
+        _aggregate (agg, cb) {
+            let db = application.DB._query.dialer;
+            return db._aggregateMembers(agg, cb);
         }
     }
 };

@@ -873,16 +873,6 @@ class Dialer extends Router {
                 communications,
                 $or: [{_nextTryTime: {$lte: Date.now()}}, {_nextTryTime: null}]
             };
-            //let i = {
-            //    _nextTryTime: -1,
-            //    priority: -1,
-            //    _id: -1,
-            //    dialer: 1,
-            //    _endCause: 1,
-            //    _lock: 1,
-            //    "communications.state": 1,
-            //    "communications.gatewayPositionMap": 1
-            //};
             console.dir(filter, {depth: 5, colors: true});
 
             dbCollection.findOneAndUpdate(
@@ -972,7 +962,7 @@ class Dialer extends Router {
                 }
             };
 
-            this.once('end', ()=> {
+            this.once('end', () => {
                 log.debug('Off channel events');
                 application.Esl.off('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
                 application.Esl.off('esl::event::CHANNEL_CREATE::*', onChannelCreate);
@@ -1101,6 +1091,7 @@ class Dialer extends Router {
     }
 
     initCalendar () {
+        
         this._calendarMap = {
             deadLineTime: 0
         };

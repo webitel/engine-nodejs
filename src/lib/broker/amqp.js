@@ -462,16 +462,16 @@ const WEBITEL_EVENT = {
 
 const ALLOW_CONSOLE_HEADER = ['Account-Domain', 'Account-Role', 'Account-Status', 'Account-User', 'Account-User-State',
     'Event-Account', 'Event-Date-Timestamp', 'Event-Domain', 'Domain-Name', 'variable_customer_id', 'User-Domain', 'User-ID',
-    'User-State'];
+    'User-State', 'Account-Skills'];
 
 function parseConsoleEvent (e) {
     let event = {
         "Event-Name": WEBITEL_EVENT[e['Event-Subclass']]
     };
 
-    for (let i = 0, len = ALLOW_CONSOLE_HEADER.length; i < len; i++)
-        if (e.hasOwnProperty(ALLOW_CONSOLE_HEADER[i]))
-            event[ALLOW_CONSOLE_HEADER[i]] = e[ALLOW_CONSOLE_HEADER[i]];
+    for (let h of ALLOW_CONSOLE_HEADER) {
+        event[h] = e[h];
+    }
 
     return event
 }
