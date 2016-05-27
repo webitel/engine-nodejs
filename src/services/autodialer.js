@@ -196,7 +196,6 @@ class AgentManager extends EventEmitter2 {
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
-                if (a.lock)
                 if (a && a.state === AgentState.Waiting && a.status === AgentStatus.Available && !a.lock &&  a.lockTime <= Date.now()) {
                     return a;
                 }
@@ -579,7 +578,7 @@ class Gw {
         this.regex = regex;
         this.maxLines = conf.limit || 0;
         this.gwName = conf.gwName;
-
+        this._vars = [];
         if (variables) {
             let arr = [];
             for (let key in variables)
@@ -1549,11 +1548,13 @@ class Member extends EventEmitter2 {
 
         let skipOk = false,
             billSec = e && +e.getHeader('variable_billsec');
+
+        this._setStateCurrentNumber(MemberState.End);
+
         if (~CODE_RESPONSE_OK.indexOf(endCause)) {
             if (billSec >= this.minCallDuration) {
                 this.endCause = endCause;
                 this.log(`OK: ${endCause}`);
-                this._setStateCurrentNumber(MemberState.End);
                 this.emit('end', this);
                 return;
             } else {
@@ -1567,7 +1568,6 @@ class Member extends EventEmitter2 {
             if (this.currentProbe >= this.tryCount) {
                 this.log(`max try count`);
                 this.endCause = END_CAUSE.MAX_TRY;
-                this._setStateCurrentNumber(MemberState.End);
             } else {
                 this.nextTime = Date.now() + (this.nextTrySec * 1000);
                 this.log(`min next time: ${this.nextTime}`);
@@ -1581,14 +1581,12 @@ class Member extends EventEmitter2 {
 
         if (~CODE_RESPONSE_ERRORS.indexOf(endCause)) {
             this.log(`fatal: ${endCause}`);
-            this._setStateCurrentNumber(MemberState.End);
         }
 
 
         if (this.currentProbe >= this.tryCount) {
             this.log(`max try count`);
             this.endCause = endCause || END_CAUSE.MAX_TRY;
-            this._setStateCurrentNumber(MemberState.End)
         } else {
             if (this._countActiveNumbers == 1 && endCause)
                 this.endCause = endCause;
