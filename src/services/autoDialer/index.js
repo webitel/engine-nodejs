@@ -23,6 +23,7 @@ class AutoDialer extends EventEmitter2 {
         this._app = app;
         this.id = 'lock id';
         this.connectDb = false;
+        this.connectWConsole = false;
         this.connectFs = false;
 
         this.activeDialer = new Collection('id');
@@ -43,11 +44,17 @@ class AutoDialer extends EventEmitter2 {
         app.on('sys::connectDb', this.onConnectDb.bind(this));
         app.on('sys::reconnectDb', this.onConnectDb.bind(this));
 
+        app.on('sys::wConsoleConnect', this.onConnectWConsole.bind(this));
+        app.on('sys::wConsoleConnectError', this.onConnectWConsoleError.bind(this));
+
         app.on('sys::connectDbError', this.onConnectDbError.bind(this));
         app.on('sys::closeDb', this.onConnectDbError.bind(this));
 
         app.on('sys::connectFsApi', this.onConnectFs.bind(this));
         app.on('sys::errorConnectFsApi', this.onConnectFsError.bind(this));
+
+
+        app.Broker.on('ccEvent', this.onAgentStatusChange.bind(this));
 
         this.activeDialer.on('added', (dialer) => {
 
@@ -94,7 +101,7 @@ class AutoDialer extends EventEmitter2 {
 
             if (dialer._agents instanceof Array && dialer.type === DIALER_TYPES.ProgressiveDialer) {
 
-                this.agentManager.initAgents(dialer._agents, (err, res) => {
+                this.agentManager.initAgents(dialer, (err, res) => {
                     if (err)
                         return log.error(err);
 
@@ -117,31 +124,23 @@ class AutoDialer extends EventEmitter2 {
     }
 
     onAgentStatusChange (e) {
-        if (e.subclass === 'callcenter::info') {
-            if (e.getHeader('CC-Action') === 'agent-status-change') {
-                let agentId = e.getHeader('CC-Agent'),
-                    agent = this.agentManager.getAgentById(agentId)
-                    ;
-
-                if (agent)
-                    agent.setStatus(e.getHeader('CC-Agent-Status'));
-
-            } else if (e.getHeader('CC-Action') === 'agent-state-change') {
-                let agentId = e.getHeader('CC-Agent'),
-                    agent = this.agentManager.getAgentById(agentId)
-                    ;
-
-                if (agent)
-                    agent.setState(e.getHeader('CC-Agent-State'));
-            }
+        let agent = this.agentManager.getAgentById(e['CC-Agent']);
+        if (!agent) return;
+        if (e['CC-Action'] === 'agent-status-change') {
+            agent.setStatus(e['CC-Agent-Status']);
+        } else if (e['CC-Action'] === 'agent-state-change') {
+            agent.setState(e['CC-Agent-State']);
         }
     }
 
     sendAgentToDialer (agent) {
         for (let key of agent.dialers) {
             let d = this.activeDialer.get(key);
-            if (d && d.setAgent(agent))
+            if (d && d.setAgent(agent)) {
                 break;
+            } else  {
+                log.debug('skip')
+            }
         }
     }
 
@@ -149,8 +148,16 @@ class AutoDialer extends EventEmitter2 {
         log.debug(`On init esl`);
         this.connectFs = true;
         esl.subscribe('CHANNEL_HANGUP_COMPLETE');
-        esl.subscribe('CUSTOM callcenter::info');
-        esl.on('esl::event::CUSTOM::*', this.onAgentStatusChange.bind(this));
+
+        this.emit('changeConnection');
+    }
+
+    onConnectWConsole () {
+        this.connectWConsole = true;
+        this.emit('changeConnection');
+    }
+    onConnectWConsoleError () {
+        this.connectWConsole = false;
         this.emit('changeConnection');
     }
 
@@ -176,7 +183,7 @@ class AutoDialer extends EventEmitter2 {
     }
 
     isReady () {
-        return this.connectDb === true && this.connectFs === true;
+        return this.connectDb === true && this.connectFs === true && this.connectWConsole === true;
     }
 
     addTask (dialerId, domain, time) {

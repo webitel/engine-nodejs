@@ -27,13 +27,16 @@ module.exports = function (event) {
             break;
         case "DOMAIN_CREATE":
             break;
+        case "USER_MANAGED":
+            // TODO
+            return;
         case "DOMAIN_DESTROY":
             onDomainDelete(event['Domain-Name']);
             break;
         case "ACCOUNT_STATUS":
             onUserStatus(event);
             break;
-    };
+    }
     event['webitel-event-name'] = event['Event-Name'];
     application.broadcastInDomain(event, event['Event-Domain']);
     application.broadcast(event);

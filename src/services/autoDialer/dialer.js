@@ -16,13 +16,17 @@ let DIALER_STATES = require('./const').DIALER_STATES,
 
 module.exports = class Dialer extends EventEmitter2 {
 
+    checkSkill (skills) {
+        return this._skillsReg.test(skills)
+    }
+
     constructor (type, config, calendarConfig) {
         super();
         this.type = type;
         this._id = config._id.toString();
         this._objectId = config._id;
 
-        this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
+        // this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
 
         this.nameDialer = config.name;
         this.number = config.number || this.nameDialer;
@@ -36,21 +40,24 @@ module.exports = class Dialer extends EventEmitter2 {
         this.countMembers = 0;
         this._countRequestHunting = 0;
 
-
         let parameters = (config && config.parameters) || {};
         [
             this._limit = 999,
             this._maxTryCount = 5,
             this._intervalTryCount = 5,
             this._minBillSec = 0,
-            this.lockId = `my best lock`
+            this.lockId = `my best lock`,
+            this._skills = []
         ] = [
             parameters.limit,
             parameters.maxTryCount,
             parameters.intervalTryCount,
             parameters.minBillSec,
-            config.lockId
+            config.lockId,
+            config.skills
         ];
+        this._skillsReg = this._skills.length > 0 ? new RegExp('\\b' + this._skills.join('\\b|\\b') + '\\b', 'i') : /.*/;
+
 
         this._variables = config.variables || {};
         this._variables.domain_name = this._domain;
@@ -428,8 +435,6 @@ module.exports = class Dialer extends EventEmitter2 {
                 this.emit('end', this);
                 return;
             }
-
-
 
             if (count === 0) {
                 this.cause = DIALER_CAUSE.ProcessNotFoundMember;

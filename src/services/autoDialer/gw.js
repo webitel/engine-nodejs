@@ -36,11 +36,11 @@ class Gw {
 
             if (agent) {
                 vars.push(
-                    `origination_callee_id_number=${agent.id}`,
+                    `origination_callee_id_number='${agent.id}'`,
                     `origination_callee_id_name='${agent.id}'`,
-                    `origination_caller_id_number=${member.number}`,
+                    `origination_caller_id_number='${member.number}'`,
                     `origination_caller_id_name='${member.name}'`,
-                    `destination_number=${member.number}`,
+                    `destination_number='${member.number}'`,
                     `originate_timeout=${agent.callTimeout}`
                 );
                 return `originate {${vars}}user/${agent.id} 'set_user:${agent.id},transfer:${member.number}' inline`;

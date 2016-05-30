@@ -390,7 +390,7 @@ Webitel.prototype.userList = function(_caller, domain, cb) {
         if (err) {
             cb(err);
             return;
-        };
+        }
 
         cb(null, res.body);
     });

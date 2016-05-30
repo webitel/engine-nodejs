@@ -41,7 +41,9 @@ const AGENT_STATUS = {
 };
 
 const AGENT_STATE = {
+    // Idle: 'Reserved',
     Idle: 'Idle',
+    Reserved: 'Reserved',
     Waiting: 'Waiting',
     InQueueCall: 'In a queue call'
 };

@@ -33,7 +33,7 @@ var Service = {
         var _originatorParam = new Array('w_jsclient_originate_number=' + _extension);
         if (options['params'] instanceof Array) {
             _originatorParam = _originatorParam.concat(options['params']);
-        };
+        }
 
         var _autoAnswerParam = [].concat( options['auto_answer_param'] || []),
             _param = '[' + _originatorParam.concat(_autoAnswerParam).join(',') + ']',

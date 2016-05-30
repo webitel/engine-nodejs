@@ -48,7 +48,7 @@ module.exports = class Member extends EventEmitter2 {
         };
         this.currentProbe = (config._probeCount || 0) + 1;
         this.endCause = null;
-        this.bigData = new Array(1e4).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
+        // this.bigData = new Array(1e4).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
         this.variables = {};
 
         this._data = config;

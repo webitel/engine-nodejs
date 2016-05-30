@@ -14,11 +14,13 @@ module.exports = class Progressive extends Dialer {
         this._am = config.agentManager;
         this._gw = new Gw({}, null, this._variables);
         this._agentReserveCallback = [];
+        this._agents = [];
 
         if (config.agents instanceof Array)
-            this._agents = [].concat(config.agents).map( (i)=> `${i}@${this._domain}`);
+            this._agents = [].concat(config.agents); //.map( (i)=> `${i}@${this._domain}`);
 
-        if (this._limit > this._agents.length)
+
+        if (this._limit > this._agents.length && this._skills.length === 0  )
             this._limit = this._agents.length;
 
         let getMembersFromEvent = (e) => {
@@ -36,9 +38,6 @@ module.exports = class Progressive extends Dialer {
 
                 this._am.taskUnReserveAgent(m._agent, m._agent.wrapUpTime);
                 log.trace(`End channels ${m.sessionId}`);
-                let recordSec = +e.getHeader('variable_record_seconds');
-                if (recordSec)
-                    m.setRecordSession(recordSec);
                 m.end(e.getHeader('variable_hangup_cause'), e);
             }
         };
@@ -94,7 +93,7 @@ module.exports = class Progressive extends Dialer {
                 return log.error(err);
             };
             var fn = this._agentReserveCallback.shift();
-            if(fn && typeof fn === 'function')
+            if(typeof fn === 'function')
                 fn(agent);
         });
         return true;
@@ -107,7 +106,7 @@ module.exports = class Progressive extends Dialer {
                 if (err) {
                     log.error(err);
                     return this._agentReserveCallback.push(cb);
-                };
+                }
                 cb(a)
             })
         } else {

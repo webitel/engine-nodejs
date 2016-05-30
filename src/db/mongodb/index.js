@@ -53,4 +53,5 @@ function initConnect (server) {
             log.error('close MongoDB: ', err);
         });
     });
-};
+
+}

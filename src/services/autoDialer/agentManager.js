@@ -6,6 +6,7 @@
 
 let EventEmitter2 = require('eventemitter2').EventEmitter2,
     ccService = require(__appRoot + '/services/callCentre'),
+    accountService = require(__appRoot + '/services/account'),
     Agent = require('./agent'),
     async = require('async'),
     log = require(__appRoot + '/lib/log')(module),
@@ -52,14 +53,15 @@ class AgentManager extends EventEmitter2 {
             for (let key of this._keys) {
                 let agent = this.agents.get(key);
                 //console.log(agent)
-                if (agent.state === AGENT_STATE.Idle && agent.unIdleTime != 0 && agent.unIdleTime <= time) {
+                if (agent.state === AGENT_STATE.Reserved && agent.unIdleTime != 0 && agent.unIdleTime <= time) {
                     agent.unIdleTime = 0;
                     this.setAgentStatus(agent, AGENT_STATE.Waiting, (err) => {
                         if (err)
                             log.error(err);
                     });
                 }
-                if (agent && agent.state === AGENT_STATE.Waiting && agent.status === AGENT_STATUS.Available && !agent.lock && agent.lockTime <= time) {
+                // TODO agent.availableTime + 3000
+                if (agent && agent.state === AGENT_STATE.Waiting && agent.status === AGENT_STATUS.Available && !agent.lock && agent.lockTime <= agent.availableTime + DIFF_CHANGE_MSEC + 500) {
                     log.debug(`send free agent ${agent.id}`);
                     this.emit('unReserveHookAgent', agent);
                 }
@@ -72,7 +74,7 @@ class AgentManager extends EventEmitter2 {
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
-                if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock &&  a.lockTime <= Date.now()) {
+                if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock &&  a.lockTime <= a.availableTime + DIFF_CHANGE_MSEC + 500) {
                     return a;
                 }
             }
@@ -83,13 +85,17 @@ class AgentManager extends EventEmitter2 {
             agent.lock = false;
             let wrapTime = Date.now() + (timeSec * 1000);
             agent.lockTime = wrapTime + DIFF_CHANGE_MSEC;
+            // TODO
+            if (agent.availableTime > agent.lockTime)
+                agent.availableTime = 0;
+
             agent.unIdleTime = wrapTime;
         }
     }
 
     reserveAgent (agent, cb) {
         agent.lock = true;
-        this.setAgentStatus(agent, AGENT_STATE.Idle, (err, res) => {
+        this.setAgentStatus(agent, AGENT_STATE.Reserved, (err, res) => {
             if (err) {
                 log.error(err);
                 agent.lock = false;
@@ -101,27 +107,61 @@ class AgentManager extends EventEmitter2 {
 
     setAgentStatus (agent, status, cb) {
         // TODO if err remove agent ??
+        log.trace(`try set new state ${agent.id} -> ${status}`);
         ccService._setAgentState(agent.id, status, cb);
     }
 
-    initAgents (agentsArray, callback) {
-        async.eachSeries(agentsArray,
-            (agentId, cb) => {
-                if (this.agents.existsKey(agentId))
-                    return cb();
+    initAgents (dialer, callback) {
 
-                ccService._getAgentParams(agentId, (err, res) => {
-                    if (err)
-                        return cb(err);
-                    let agentParams = res && res[0];
-                    if (agentParams) {
-                        this.agents.add(agentId, new Agent(agentId, agentParams));
+        async.waterfall(
+            [
+                (cb) => {
+                    accountService._listByDomain(dialer._domain, cb);
+                },
+
+                (agents, cb) => {
+                    let _agents = [];
+                    if (dialer._skills.length > 0) {
+                        for (let key in agents) {
+                            if (~dialer._agents.indexOf(key) || dialer.checkSkill(agents[key].skills))
+                            _agents.push(agents[key]);
+                        }
+                    } else {
+                        for (let agent of dialer._agents) {
+                            if (agents.hasOwnProperty(agent))
+                                _agents.push(agents[agent]);
+                        }
                     }
-                    // TODO SKIP???
-                    return cb();
-                });
-            },
-            callback
+                    cb(null, _agents)
+                }
+            ],
+            (err, agents) => {
+                if (err)
+                    return log.error(err);
+                dialer._agents = [];
+
+                async.eachSeries(agents,
+                    (agent, cb) => {
+                        let agentId = `${agent.id}@${agent.domain}`;
+                        if (this.agents.existsKey(agentId))
+                            return cb();
+
+                        ccService._getAgentParams(agentId, (err, res) => {
+                            if (err)
+                                return cb(err);
+                            let agentParams = res && res[0];
+                            if (agentParams) {
+                                dialer._agents.push(agentId);
+                                this.agents.add(agentId, new Agent(agentId, agentParams, agent.skills));
+                            }
+                            // TODO SKIP???
+                            return cb();
+                        });
+                    },
+                    callback
+                );
+
+            }
         );
     }
 
@@ -132,7 +172,7 @@ class AgentManager extends EventEmitter2 {
                 a.addDialer(dialerId)
             } else {
                 log.warn(`Bad agent id ${i}`)
-            };
+            }
         })
     }
 
@@ -143,7 +183,7 @@ class AgentManager extends EventEmitter2 {
                 a.removeDialer(dialerId);
                 if (a.dialers.length === 0) {
                     this.agents.remove(i);
-                    if (a.state === AGENT_STATE.Idle && a.unIdleTime !== 0)
+                    if (a.state === AGENT_STATE.Reserved && a.unIdleTime !== 0)
                         this.setAgentStatus(a, AGENT_STATE.Waiting, (err) => {
                             if (err)
                                 log.error(err);
@@ -151,7 +191,7 @@ class AgentManager extends EventEmitter2 {
                 }
             } else {
                 log.warn(`Bad agent id ${i}`)
-            };
+            }
         })
     }
 

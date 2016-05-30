@@ -118,7 +118,7 @@ class WebitelEsl extends EventEmitter2 {
             let wConsole = application.WConsole,
                 scope = this
                 ;
-            wConsole.subscribe(["USER_CREATE", "USER_DESTROY", "DOMAIN_CREATE", "DOMAIN_DESTROY", "ACCOUNT_STATUS"]);
+            wConsole.subscribe(["USER_CREATE", "USER_DESTROY", "DOMAIN_CREATE", "DOMAIN_DESTROY", "ACCOUNT_STATUS", "USER_MANAGED"]);
             wConsole.on('webitel::event::event::**', (e) => scope.emit('webitelEvent', e.serialize('json', 1)));
         });
     };

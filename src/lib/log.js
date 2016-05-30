@@ -33,7 +33,7 @@ function getLogger(module) {
                 colorize: 'all',
                 level: conf.get('application:loglevel'),
                 label: path,
-                timestamp: true
+                timestamp: false
             })
         ]
     });

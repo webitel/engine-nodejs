@@ -251,7 +251,11 @@ class WebitelAmqp extends EventEmitter2 {
                                 let e = JSON.parse(msg.content.toString()),
                                     domain = getDomain(e);
 
-                                if (!domain) return;
+                                if (!domain) {
+                                    log.debug(`No found domain`, domain);
+                                    log.trace(e);
+                                    return;
+                                }
 
                                 scope.emit('hookEvent', e['Event-Name'], domain, e);
                             } catch (e) {
@@ -275,6 +279,7 @@ class WebitelAmqp extends EventEmitter2 {
                         channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Auser_destroy.*.*.*");
                         channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Adomain_create.*.*.*");
                         channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Adomain_destroy.*.*.*");
+                        channel.bindQueue(qok.queue, scope.Exchange.FS_CC_EVENT, "*.webitel%3A%3Auser_managed.*.*.*");
 
                         channel.consume(qok.queue, (msg) => {
                             try {
@@ -457,12 +462,13 @@ const WEBITEL_EVENT = {
     "webitel::user_create": "USER_CREATE",
     "webitel::user_destroy": "USER_DESTROY",
     "webitel::domain_create": "DOMAIN_CREATE",
-    "webitel::domain_destroy": "DOMAIN_DESTROY"
+    "webitel::domain_destroy": "DOMAIN_DESTROY",
+    "webitel::user_managed": "USER_MANAGED"
 };
 
 const ALLOW_CONSOLE_HEADER = ['Account-Domain', 'Account-Role', 'Account-Status', 'Account-User', 'Account-User-State',
     'Event-Account', 'Event-Date-Timestamp', 'Event-Domain', 'Domain-Name', 'variable_customer_id', 'User-Domain', 'User-ID',
-    'User-State', 'Account-Skills'];
+    'User-State', 'Account-Skills', 'Account-Status-Descript', 'Account-Agent-State', 'Account-Agent-Status'];
 
 function parseConsoleEvent (e) {
     let event = {
@@ -470,7 +476,8 @@ function parseConsoleEvent (e) {
     };
 
     for (let h of ALLOW_CONSOLE_HEADER) {
-        event[h] = e[h];
+        if (e.hasOwnProperty(h))
+            event[h] = e[h];
     }
 
     return event
@@ -509,7 +516,10 @@ function getDomain (data) {
         return data.variable_w_domain;
 
     if (data['Channel-Presence-ID'])
-        return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1)
+        return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1);
+
+    if (data['variable_presence_id'])
+        return data['variable_presence_id'].substring(data['variable_presence_id'].indexOf('@') + 1);
 }
 
 function getLastKey (rk) {

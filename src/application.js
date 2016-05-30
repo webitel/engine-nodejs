@@ -17,7 +17,7 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     Broker = require('./lib/broker/index'),
     Hooks = require('./services/hook/hookClass'),
     checkEslError = require('./middleware/checkEslError'),
-    AutoDialer = require('./services/autodialer')
+    AutoDialer = require('./services/autoDialer')
     ;
 
 class Application extends EventEmitter2 {
@@ -33,6 +33,7 @@ class Application extends EventEmitter2 {
         this.loggedOutAgent = new Collection('id');
         this.Broker = new Broker(conf.get('broker'), this);
         new Hooks(this);
+        this.AutoDialer = new AutoDialer(this);
         process.nextTick(this.connectDb.bind(this));
     }
 
@@ -53,8 +54,6 @@ class Application extends EventEmitter2 {
         var scope = this,
             ret = 0;
 
-        // todo
-        this.AutoDialer = new AutoDialer(this);
 
         scope.once('sys::connectDb', function (db) {
             //TODO bug!! account event prior connectToEsl
