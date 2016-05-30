@@ -37,25 +37,20 @@ class Hook {
             return false;
 
         for (let key in this._filters) {
-            if (!Operations.hasOwnProperty(this._filters[key].operation)
+            if (!obj.hasOwnProperty(key)
+                || !Operations.hasOwnProperty(this._filters[key].operation)
                 || !Operations[this._filters[key].operation](obj[key], this._filters[key].value))
                 return false;
-        }
+        };
         return true;
     };
 }
 
 const Operations = {
     "==": function (a, b) {
-        if (!a) {
-            a = 'null';
-        }
         return a == b;
     },
     "!=": function (a, b) {
-        if (!a) {
-            a = 'null';
-        }
         return a != b;
     },
     "<": function (a, b) {
@@ -69,19 +64,6 @@ const Operations = {
     },
     ">=": function (a, b) {
         return a >= b
-    },
-    "reg": function (a, b) {
-        try {
-            let flags = b.match(new RegExp('^/(.*?)/([gimy]*)$'));
-            if (!flags)
-                flags = [null, b];
-
-            let regex = new RegExp(flags[1], flags[2]);
-            return regex.test(a);
-        } catch (e) {
-            log.error(e);
-            return false;
-        }
     }
 };
 
@@ -149,7 +131,7 @@ class Trigger {
             brokerConnected = true;
             init();
         });
-        // TODO fix reconnect
+
         app.once('sys::connectDb', (db)=> {
             scope.Db = db._query.hook;
             dbConnected = true;
@@ -170,7 +152,7 @@ class Trigger {
                     result.push(new Hook(item));
                 });
                 return cb(null, result);
-            }
+            };
             return cb(null, []);
         });
     };
@@ -234,12 +216,11 @@ class Trigger {
                         log.trace(e);
                     }
                 }
-
             });
         } catch (e) {
             log.error(e);
-        }
-    }
+        };
+    };
 
     send (hook, name, e) {
         let message = new Message(name, e, hook.fields, hook.map);
