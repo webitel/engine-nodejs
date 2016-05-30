@@ -37,8 +37,7 @@ class Hook {
             return false;
 
         for (let key in this._filters) {
-            if (!obj.hasOwnProperty(key)
-                || !Operations.hasOwnProperty(this._filters[key].operation)
+            if (!Operations.hasOwnProperty(this._filters[key].operation)
                 || !Operations[this._filters[key].operation](obj[key], this._filters[key].value))
                 return false;
         };
