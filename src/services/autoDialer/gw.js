@@ -41,7 +41,8 @@ class Gw {
                     `origination_caller_id_number='${member.number}'`,
                     `origination_caller_id_name='${member.name}'`,
                     `destination_number='${member.number}'`,
-                    `originate_timeout=${agent.callTimeout}`
+                    `originate_timeout=${agent.callTimeout}`,
+                    'webitel_direction=outbound'
                 );
                 return `originate {${vars}}user/${agent.id} 'set_user:${agent.id},transfer:${member.number}' inline`;
             }

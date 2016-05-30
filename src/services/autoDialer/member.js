@@ -85,7 +85,7 @@ module.exports = class Member extends EventEmitter2 {
 
             if (this._currentNumber) {
                 this._currentNumber._probe++;
-                this.number = this._currentNumber.number;
+                this.number = this._currentNumber.number.replace(/\D/g, '');
                 this.log(`set number: ${this.number}`);
             } else {
                 console.log('ERROR', this);
