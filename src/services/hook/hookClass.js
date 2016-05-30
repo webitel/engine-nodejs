@@ -44,7 +44,7 @@ class Hook {
         };
         return true;
     };
-};
+}
 
 const Operations = {
     "==": function (a, b) {
@@ -207,10 +207,15 @@ class Trigger {
                 if (err)
                     return log.error(err);
 
-                for (let hook of hooks)
-                    if (hook.check(e))
+                for (let hook of hooks) {
+                    if (hook.check(e)) {
                         this.send(hook, eventName, e);
-
+                    } else {
+                        log.debug(`skipp ${hook.event}`);
+                        log.trace(hook);
+                        log.trace(e);
+                    }
+                }
             });
         } catch (e) {
             log.error(e);

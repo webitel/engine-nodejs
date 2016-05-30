@@ -251,7 +251,11 @@ class WebitelAmqp extends EventEmitter2 {
                                 let e = JSON.parse(msg.content.toString()),
                                     domain = getDomain(e);
 
-                                if (!domain) return;
+                                if (!domain) {
+                                    log.debug(`No found domain`, domain);
+                                    log.trace(e);
+                                    return;
+                                }
 
                                 scope.emit('hookEvent', e['Event-Name'], domain, e);
                             } catch (e) {
@@ -509,7 +513,10 @@ function getDomain (data) {
         return data.variable_w_domain;
 
     if (data['Channel-Presence-ID'])
-        return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1)
+        return data['Channel-Presence-ID'].substring(data['Channel-Presence-ID'].indexOf('@') + 1);
+
+    if (data['variable_presence_id'])
+        return data['variable_presence_id'].substring(data['variable_presence_id'].indexOf('@') + 1);
 }
 
 function getLastKey (rk) {
