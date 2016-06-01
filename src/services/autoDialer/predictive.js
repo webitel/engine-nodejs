@@ -27,7 +27,7 @@ module.exports = class Predictive extends Dialer {
         if (this._limit > this._agents.length && this._skills.length === 0  )
             this._limit = this._agents.length;
 
-        this._limit = 10;
+        this._limit = 5;
 
         let getMembersFromEvent = (e) => {
             return this.members.get(e.getHeader('variable_dlr_member_id'))
@@ -79,6 +79,10 @@ module.exports = class Predictive extends Dialer {
                 member.log(`dialString: ${ds}`);
                 log.trace(`Call ${ds}`);
 
+                this._limit = this._am.availableCount + 3;
+                console.log(this._limit);
+                
+
                 let onChannelAnswer = (e) => {
                     let agent = this._am.getFreeAgent(this._agents);
                     if (agent) {
@@ -87,16 +91,20 @@ module.exports = class Predictive extends Dialer {
                         application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`);
                     } else {
                         console.log('--------------------------- NO AGENTS ---------------------------');
+                        application.Esl.bgapi(`uuid_kill ${member.sessionId}`);
+                        member.end('BAD', e);
                     }
 
                 };
+
+                member.once('end', () => {
+                    this._router.freeGateway(gw)
+                });
 
                 let onChannelDestroy = (e) => {
                     if (member._agent) {
                         this._am.taskUnReserveAgent(member._agent, member._agent.rejectDelayTime);
                     }
-                    if (!member.processEnd)
-                        this._router.freeGateway(member._gw);
                     log.trace(`End channels ${member.sessionId}`);
                     member.end(e.getHeader('variable_hangup_cause'), e);
                 };
@@ -107,7 +115,6 @@ module.exports = class Predictive extends Dialer {
                 application.Esl.bgapi(ds, (res) => {
 
                     if (/^-ERR/.test(res.body)) {
-                        this._router.freeGateway(gw);
                         let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                         member.end(error);
                         return;

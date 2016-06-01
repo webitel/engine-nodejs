@@ -47,9 +47,15 @@ class Hook {
 
 const Operations = {
     "==": function (a, b) {
+        if (b === 'null')
+            b = undefined;
+
         return a == b;
     },
     "!=": function (a, b) {
+        if (b === 'null')
+            b = undefined;
+
         return a != b;
     },
     "<": function (a, b) {
@@ -63,6 +69,21 @@ const Operations = {
     },
     ">=": function (a, b) {
         return a >= b
+    },
+    "reg": function (a, b) {
+        try {
+            if (typeof b != 'string')
+                return;
+            let flags = b.match(new RegExp('^/(.*?)/([gimy]*)$'));
+            if (!flags)
+                flags = [null, b];
+
+            let regex = new RegExp(flags[1], flags[2]);
+            return regex.test(a);
+        } catch (e) {
+            log.error(e);
+            return false;
+        }
     }
 };
 

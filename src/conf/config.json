@@ -55,12 +55,6 @@
         "loglevel": "trace",
         "callcenter": true,
         "writeUserStatus": false,
-        "logstash": {
-            "enabled": false,
-            "host": "logstash",
-            "port": 28777,
-            "node_name": "core"
-        },
         "auth": {
             "tokenSecretKey": "g6Yhdb8jUm!hJ78Jhsw4EEc",
             "expiresDays": 7
