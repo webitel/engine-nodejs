@@ -2,6 +2,8 @@
  * Created by igor on 25.05.16.
  */
 
+let log = require(__appRoot + '/lib/log')(module);
+
 class Gw {
     constructor (conf, regex, variables) {
         this.activeLine = 0;
@@ -22,8 +24,12 @@ class Gw {
         this.dialString = conf.gwProto == 'sip' && conf.gwName ? `sofia/gateway/${conf.gwName}/${conf.dialString}` : conf.dialString;
     }
 
+    dialAgent (agent) {
+        return `originate user/${agent.id} &park()`;
+    }
+
     fnDialString (member) {
-        return (agent, sysVars) => {
+        return (agent, sysVars, park) => {
             let vars = [`dlr_member_id=${member._id.toString()}`, `cc_queue='${member.queueName}'`].concat(this._vars);
 
             if (sysVars instanceof Array) {
@@ -48,7 +54,6 @@ class Gw {
             }
 
             vars.push(
-                `dlr_queue=${member._queueId}`,
                 `origination_uuid=${member.sessionId}`,
                 `origination_caller_id_number='${member.queueNumber}'`,
                 `origination_caller_id_name='${member.queueName}'`,
@@ -57,16 +62,22 @@ class Gw {
             );
 
             let gwString = member.number.replace(this.regex, this.dialString);
+            if (park) {
+                return `originate {${vars}}${gwString} &park()`;
+            } else {
+                vars.push(`dlr_queue=${member._queueId}`);
+                return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
+            }
 
-            return `originate {${vars}}${gwString} ` +  '&socket($${acr_srv})';
         };
     }
 
     tryLock (member) {
-        if (this.activeLine >= this.maxLines || !member.number)
+        if (this.activeLine >= this.maxLines)
             return false;
 
         this.activeLine++;
+        log.debug(`Active line: ${this.dialString} ->> ${this.activeLine}`);
 
         return this.fnDialString(member)
     }

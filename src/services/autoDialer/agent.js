@@ -13,9 +13,11 @@ class Agent {
 
     constructor (key, params, skills) {
         this.id = key;
+        this.number = key.split('@')[0];
         this.state = params.state;
         this.status = params.status;
         this.skills = params.skills;
+        // this.bigData = new Array(1e6).join('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n');
         this.maxNoAnswer = +(params.max_no_answer || 0);
         this.wrapUpTime = +(params.wrap_up_time || 10);
         this.rejectDelayTime = +(params.reject_delay_time || 0);

@@ -41,8 +41,11 @@ module.exports = class VoiceBroadcast extends Dialer {
                 let ds = gw.dialString();
                 member.log(`dialString: ${ds}`);
 
-                let onChannelHangup = (e) => {
+                member.once('end', () => {
                     this._router.freeGateway(gw);
+                });
+
+                let onChannelHangup = (e) => {
                     member.channelsCount--;
                     member.end(e.getHeader('variable_hangup_cause'), e);
                 };
@@ -59,7 +62,6 @@ module.exports = class VoiceBroadcast extends Dialer {
 
                     if (/^-ERR/.test(res.body)) {
                         member.offEslEvent();
-                        this._router.freeGateway(gw);
                         let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
                         member.end(error);
                     }

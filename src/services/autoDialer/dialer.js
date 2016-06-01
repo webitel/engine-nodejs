@@ -263,7 +263,7 @@ module.exports = class Dialer extends EventEmitter2 {
     }
 
     checkLimit () {
-        return (this._countRequestHunting > this._limit || this.members.length()  >= this._limit);
+        return (this._countRequestHunting + this.members.length() >= this._limit || this.members.length()  >= this._limit);
     }
 
     reCalcCalendar () {

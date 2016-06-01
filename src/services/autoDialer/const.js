@@ -63,7 +63,8 @@ const MAX_MEMBER_RETRY = 999;
 
 const DIALER_TYPES = {
     VoiceBroadcasting: "Voice Broadcasting",
-    ProgressiveDialer: "Progressive Dialer"
+    ProgressiveDialer: "Progressive Dialer",
+    PredictiveDialer: "Predictive Dialer"
 };
 
 module.exports = {

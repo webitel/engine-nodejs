@@ -468,7 +468,7 @@ const WEBITEL_EVENT = {
 
 const ALLOW_CONSOLE_HEADER = ['Account-Domain', 'Account-Role', 'Account-Status', 'Account-User', 'Account-User-State',
     'Event-Account', 'Event-Date-Timestamp', 'Event-Domain', 'Domain-Name', 'variable_customer_id', 'User-Domain', 'User-ID',
-    'User-State', 'Account-Skills', 'Account-Status-Descript', 'Account-Agent-State', 'Account-Agent-Status'];
+    'User-State', 'Account-Skills', 'Account-Status-Descript', 'Account-Agent-State', 'Account-Agent-Status', 'variable_skills'];
 
 function parseConsoleEvent (e) {
     let event = {

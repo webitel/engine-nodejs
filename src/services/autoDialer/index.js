@@ -13,7 +13,8 @@ let EventEmitter2 = require('eventemitter2').EventEmitter2,
     END_CAUSE = require('./const').END_CAUSE,
     Collection = require(__appRoot + '/lib/collection'),
     VoiceDialer = require('./voice'),
-    ProgressiveDialer = require('./progressive')
+    ProgressiveDialer = require('./progressive'),
+    PredictiveDialer = require('./predictive')
     ;
 
 class AutoDialer extends EventEmitter2 {
@@ -55,6 +56,18 @@ class AutoDialer extends EventEmitter2 {
 
 
         app.Broker.on('ccEvent', this.onAgentStatusChange.bind(this));
+        // app.Broker.on('webitelEvent', (e) => {
+        //
+        //     // TODO replace skills;
+        //     return void 0;
+        //     if (e['Event-Name'] == 'USER_MANAGED') {
+        //         let agentId = `${e['Event-Account']}@${e['User-Domain']}`;
+        //         let agent = this.agentManager.getAgentById(agentId);
+        //         if (agent) {
+        //
+        //         }
+        //     }
+        // });
 
         this.activeDialer.on('added', (dialer) => {
 
@@ -70,7 +83,7 @@ class AutoDialer extends EventEmitter2 {
             dialer.once('end', (d) => {
                 log.debug(`End dialer ${d.nameDialer} - ${d._id} - ${d.cause}`);
 
-                if (dialer.type === DIALER_TYPES.ProgressiveDialer && dialer._agents instanceof Array)
+                if (dialer._agents instanceof Array && (dialer.type === DIALER_TYPES.ProgressiveDialer || dialer.type === DIALER_TYPES.PredictiveDialer))
                     this.agentManager.removeDialerInAgents(dialer._agents, dialer._id);
 
                 let sleepTime = (d.state === DIALER_STATES.Sleep) ? (new Date(Date.now() + dialer._calendar.sleepTime)) : null;
@@ -99,7 +112,7 @@ class AutoDialer extends EventEmitter2 {
                 this.activeDialer.remove(d._id);
             });
 
-            if (dialer._agents instanceof Array && dialer.type === DIALER_TYPES.ProgressiveDialer) {
+            if (dialer.type === DIALER_TYPES.PredictiveDialer || dialer.type === DIALER_TYPES.ProgressiveDialer) {
 
                 this.agentManager.initAgents(dialer, (err, res) => {
                     if (err)
@@ -293,6 +306,9 @@ class AutoDialer extends EventEmitter2 {
                 return new ProgressiveDialer(dialerDb, calendarDb);
             case DIALER_TYPES.VoiceBroadcasting:
                 return new VoiceDialer(dialerDb, calendarDb);
+            case  DIALER_TYPES.PredictiveDialer:
+                dialerDb.agentManager = this.agentManager;
+                return new PredictiveDialer(dialerDb, calendarDb);
         }
     }
 

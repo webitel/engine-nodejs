@@ -22,13 +22,15 @@ class AgentManager extends EventEmitter2 {
 
         super();
         this.agents = new Collection('id');
+        this.availableCount = 0;
+
         this._keys = [];
 
         this.agents.on('added', (a, key) => {
             if (!~this._keys.indexOf(key))
                 this._keys.push(key);
 
-            log.trace('add agent: ', a);
+            log.trace('add agent: ', a.id);
             if (this.agents.length() == 1 && !this.timerId) {
                 this.tick();
                 log.debug('Start agent manager timer');
@@ -49,7 +51,8 @@ class AgentManager extends EventEmitter2 {
         this.timerId = null;
 
         this.tick = () => {
-            let time = Date.now();
+            let time = Date.now(),
+                availableCount = 0;
             for (let key of this._keys) {
                 let agent = this.agents.get(key);
                 //console.log(agent)
@@ -63,9 +66,11 @@ class AgentManager extends EventEmitter2 {
                 // TODO agent.availableTime + 3000
                 if (agent && agent.state === AGENT_STATE.Waiting && agent.status === AGENT_STATUS.Available && !agent.lock && agent.lockTime <= agent.availableTime + DIFF_CHANGE_MSEC + 500) {
                     log.debug(`send free agent ${agent.id}`);
+                    availableCount++;
                     this.emit('unReserveHookAgent', agent);
                 }
             }
+            this.availableCount = availableCount;
             this.timerId = setTimeout(this.tick, 1500);
         };
     }
@@ -143,8 +148,10 @@ class AgentManager extends EventEmitter2 {
                 async.eachSeries(agents,
                     (agent, cb) => {
                         let agentId = `${agent.id}@${agent.domain}`;
-                        if (this.agents.existsKey(agentId))
+                        if (this.agents.existsKey(agentId)) {
+                            dialer._agents.push(agentId);
                             return cb();
+                        }
 
                         ccService._getAgentParams(agentId, (err, res) => {
                             if (err)
