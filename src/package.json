@@ -14,12 +14,12 @@
     "async": "^1.4.0",
     "body-parser": "^1.13.3",
     "crypto": "0.0.3",
-    "eventemitter2": "^0.4.14",
+    "eventemitter2": "^1.0.3",
     "express": "^4.13.3",
     "http-proxy": "^1.13.2",
     "jwt-simple": "^0.3.0",
     "moment-timezone": "^0.5.4",
-    "mongodb": "^2.1.18",
+    "mongodb": "^2.1.21",
     "nconf": "^0.7.1",
     "node-uuid": "^1.4.3",
     "nodemailer": "^1.4.0",
@@ -29,7 +29,7 @@
     "serve-favicon": "^2.3.0",
     "underscore": "^1.8.3",
     "winston": "^2.2.0",
-    "ws": "^1.0.1"
+    "ws": "^1.1.0"
   },
   "devDependencies": {
     "chai": "^3.2.0",

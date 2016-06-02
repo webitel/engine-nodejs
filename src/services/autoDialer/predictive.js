@@ -15,6 +15,7 @@ module.exports = class Predictive extends Dialer {
         super(DIALER_TYPES.PredictiveDialer, config, calendarConf);
 
         this._am = config.agentManager;
+        console.log(this._am.availableCount);
         this._gw = new Gw({}, null, this._variables);
         this._router = new Router(config.resources, this._variables);
         this._agentReserveCallback = [];
@@ -27,7 +28,7 @@ module.exports = class Predictive extends Dialer {
         if (this._limit > this._agents.length && this._skills.length === 0  )
             this._limit = this._agents.length;
 
-        this._limit = 5;
+        this._limit = 20;
 
         let getMembersFromEvent = (e) => {
             return this.members.get(e.getHeader('variable_dlr_member_id'))
@@ -70,7 +71,7 @@ module.exports = class Predictive extends Dialer {
 
     dialMember (member) {
         log.trace(`try call ${member.sessionId}`);
-
+        this._am.availableCount
         let gw = this._router.getDialStringFromMember(member);
 
         if (gw.found) {
@@ -79,16 +80,21 @@ module.exports = class Predictive extends Dialer {
                 member.log(`dialString: ${ds}`);
                 log.trace(`Call ${ds}`);
 
-                this._limit = this._am.availableCount + 3;
+                this._limit = this._am.availableCount;
                 console.log(this._limit);
                 
 
                 let onChannelAnswer = (e) => {
+                    console.log("ANSWERRRRRRRR");
+
                     let agent = this._am.getFreeAgent(this._agents);
                     if (agent) {
-                        member._agent = agent;
-                        member.log(`set agent: ${agent.id}`);
-                        application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`);
+                        this._am.reserveAgent(agent, () => {
+                            member._agent = agent;
+                            member.log(`set agent: ${agent.id}`);
+                            application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`);
+                        });
+
                     } else {
                         console.log('--------------------------- NO AGENTS ---------------------------');
                         application.Esl.bgapi(`uuid_kill ${member.sessionId}`);
@@ -98,13 +104,13 @@ module.exports = class Predictive extends Dialer {
                 };
 
                 member.once('end', () => {
-                    this._router.freeGateway(gw)
+                    this._router.freeGateway(gw);
+                    if (member._agent) {
+                        this._am.taskUnReserveAgent(member._agent, 0);
+                    }
                 });
 
                 let onChannelDestroy = (e) => {
-                    if (member._agent) {
-                        this._am.taskUnReserveAgent(member._agent, member._agent.rejectDelayTime);
-                    }
                     log.trace(`End channels ${member.sessionId}`);
                     member.end(e.getHeader('variable_hangup_cause'), e);
                 };
@@ -134,7 +140,10 @@ module.exports = class Predictive extends Dialer {
     }
 
     setAgent (agent) {
-        return false
+        this._limit++;
+        this.huntingMember();
+        return false;
+
         // let ds = this._gw.dialAgent(agent);
         // this._am.reserveAgent(agent, (err) => {
         //     if (err) {
@@ -149,6 +158,18 @@ module.exports = class Predictive extends Dialer {
         //     });
         // });
         // return true;
+    }
+
+    setLimit () {
+        let p = 10; // the hit rate
+        let m = 10; // parameter of service distribution
+        let qD = 10; // the dial frequency
+        let q = this.members.length(); // inbound call flow
+
+        let aMax = 2; // The maximum abandon rate
+        let agentsCount = this._am.availableCount; // the number of free agents
+
+
     }
 
     findAvailAgents (cb) {

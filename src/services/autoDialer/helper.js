@@ -15,8 +15,8 @@ console.log(calcErlang({
 
 function calcErlang(option) {
     let [
-        avgCallDuration = 180, //sec
-        avgWrapUpTime = 60, // sec
+        avgCallDuration = 35.85, //sec
+        avgWrapUpTime = 15, // sec
         callAnsweredTargetProcent = 80, //%
         callAnsweredTargetSec = 20, //%
         truncBlockingTarget = 0.010, //%
@@ -72,11 +72,9 @@ function erlangCPODelayTime(traffic, lines, holdTime, delayTime) {
 
 function erlangB(traffic, pLines) {
     let PBR, index;
-    if (traffic > 0)
-    {
+    if (traffic > 0) {
         PBR = (1 + traffic) / traffic;
-        for (index = 2; index != pLines + 1; index++)
-        {
+        for (index = 2; index != pLines + 1; index++) {
             PBR = index / traffic * PBR + 1;
             if (PBR > 10000) {
                 return 0;
@@ -90,9 +88,9 @@ function erlangB(traffic, pLines) {
 }
 
 function erlangC(traffic, pLines) {
-    let EBResult, probability;
-    EBResult = erlangB(traffic, pLines);
-    probability = EBResult / (1 - (traffic / pLines) * (1 - EBResult));
+    let eBResult, probability;
+    eBResult = erlangB(traffic, pLines);
+    probability = eBResult / (1 - (traffic / pLines) * (1 - eBResult));
     if (probability > 1) {
         return 1
     } else {
