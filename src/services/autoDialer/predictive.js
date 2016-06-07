@@ -133,6 +133,7 @@ module.exports = class Predictive extends Dialer {
                     this._activeCallCount--;
                     member.log(`minus line`);
                     destoySession = true;
+                    member.channelsCount--;
                 }
                 if (e.getHeader('variable_hangup_cause') != 'NORMAL_CLEARING') {
                     this._gotCallCount--;
@@ -150,6 +151,7 @@ module.exports = class Predictive extends Dialer {
             console.log(`dial count: ${this._activeCallCount}`);
             this._callRequestCount++;
             this._allCallCount++;
+            member.channelsCount++;
             application.Esl.bgapi(ds, (res) => {
                 this._callRequestCount--;
                 member.log(res.body);
@@ -160,6 +162,7 @@ module.exports = class Predictive extends Dialer {
                     if (!destoySession) {
                         member.log(`minus line`);
                         this._activeCallCount--;
+                        member.channelsCount--;
                         destoySession = true;
                     }
                     member.end(error);
@@ -169,10 +172,10 @@ module.exports = class Predictive extends Dialer {
                     // TODO
                     member.log(`minus line`);
                     destoySession = true;
+                    member.channelsCount--;
                     member.end('DESTINATION_OUT_OF_ORDER');
                     return
                 }
-                member.channelsCount++;
             });
         };
 
@@ -188,6 +191,11 @@ module.exports = class Predictive extends Dialer {
 
     calcLimit (agent) {
         console.log(`call request ${this._callRequestCount}`);
+        if (!this.isReady()) {
+            this._queueCall.length = 0;
+            return;
+        }
+
         if (this._callRequestCount != 0) return;
         let cc = 0;
         this._skipAgents = this._am.getFreeAgents(this._agents);
