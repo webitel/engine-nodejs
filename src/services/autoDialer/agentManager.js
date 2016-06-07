@@ -84,20 +84,22 @@ class AgentManager extends EventEmitter2 {
                     return a;
                 }
             }
-            this.agents;
         }
     }
     getFreeAgents (agents) {
-        let res = [];
+        let resAvailable = [],
+            countNotLogged = 0;
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
                 if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock &&  a.lockTime <= a.availableTime + DIFF_CHANGE_MSEC + 500) {
-                    res.push(a);
+                    resAvailable.push(a);
+                } else if (a && a.status !== AGENT_STATUS.LoggedOut) {
+                    countNotLogged++
                 }
             }
-
-        return res;
+        countNotLogged += resAvailable.length;
+        return resAvailable;
     }
 
     getFreeCount (agents) {

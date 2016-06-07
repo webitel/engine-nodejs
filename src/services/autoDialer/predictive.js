@@ -101,7 +101,6 @@ module.exports = class Predictive extends Dialer {
                         member._agent = agent;
                         member.log(`set agent: ${agent.id}`);
                         application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`);
-                        // Успішні дзвінки, потрібно для старту...
                         this._gotCallCount++;
                     });
 
@@ -171,13 +170,13 @@ module.exports = class Predictive extends Dialer {
         }.bind(this), 15000);
     }
 
-    calcLimit () {
+    calcLimit (agent) {
         console.log(`call request ${this._callRequestCount}`);
-
+        if (this._callRequestCount != 0) return;
         let cc = 0;
         this._skipAgents = this._am.getFreeAgents(this._agents);
-        let aC = 20 - this._activeCallCount; //this._skipAgents.length;
-        if (aC < 0)
+        let aC = this._skipAgents.length; //this._skipAgents.length;
+        if (aC == 0)
                 return;
 
         if (this._predictAdjust != 0 && this._gotCallCount > 10 && aC > 0) {
@@ -249,7 +248,7 @@ module.exports = class Predictive extends Dialer {
                 member.once('end', () => {
                     this._router.freeGateway(gw);
                     if (member._agent) {
-                        this._am.taskUnReserveAgent(member._agent, 0);
+                        this._am.taskUnReserveAgent(member._agent, 10);
                     }
                 });
 
@@ -267,10 +266,10 @@ module.exports = class Predictive extends Dialer {
     }
 
     setAgent (agent) {
-        if (~this._skipAgents.indexOf(agent.id) || !this.isReady())
+        if (~this._skipAgents.indexOf(agent) || !this.isReady())
                 return false;
         // console.log(`free agent ${agent.id}`);
-        this.calcLimit();
+        this.calcLimit(agent);
         // this._limit++;
         // this.huntingMember();
         return true;
