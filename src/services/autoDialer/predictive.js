@@ -40,11 +40,15 @@ module.exports = class Predictive extends Dialer {
             this._agents = [].concat(config.agents); //.map( (i)=> `${i}@${this._domain}`);
 
 
+
         if (this._limit > this._agents.length && this._skills.length === 0  )
             this._limit = this._agents.length;
 
         // start with available count
-        this._limit = this._agents.length * 2;
+        if (this._limit > this._router._limit) {
+            log.warn(`skip dialer limit, max resources ${this._router._limit}`);
+            this._limit = this._router._limit;
+        }
 
         let getMembersFromEvent = (e) => {
             return this.members.get(e.getHeader('variable_dlr_member_id'))
@@ -75,7 +79,7 @@ module.exports = class Predictive extends Dialer {
         //     application.Esl.off('esl::event::CHANNEL_ANSWER::*', onChannelAnswer);
         //     application.Esl.off('esl::event::CHANNEL_BRIDGE::*', onChannelBridge);
         // });
-        application.Esl.subscribe(['CHANNEL_CREATE', 'CHANNEL_DESTROY', 'CHANNEL_HANGUP_COMPLETE', 'CHANNEL_PARK', 'CHANNEL_ANSWER', 'CHANNEL_BRIDGE']);
+        application.Esl.subscribe(['CHANNEL_HANGUP_COMPLETE', 'CHANNEL_ANSWER']);
 
         // application.Esl.on('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
         // application.Esl.on('esl::event::CHANNEL_CREATE::*', onChannelCreate);
@@ -100,8 +104,16 @@ module.exports = class Predictive extends Dialer {
                     this._am.reserveAgent(agent, () => {
                         member._agent = agent;
                         member.log(`set agent: ${agent.id}`);
-                        application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`);
-                        this._gotCallCount++;
+                        application.Esl.bgapi(`uuid_transfer ${member.sessionId} ${agent.number}`, (res) => {
+                            member.log(res.body);
+                            if (/^-ERR/.test(res.body)) {
+                                this._badCallCount++;
+                                application.Esl.bgapi(`uuid_kill ${member.sessionId}`);
+                                member.end('BAD', e);
+                                return;
+                            }
+                            this._gotCallCount++;
+                        });
                     });
 
                 } else {
@@ -140,6 +152,7 @@ module.exports = class Predictive extends Dialer {
             this._allCallCount++;
             application.Esl.bgapi(ds, (res) => {
                 this._callRequestCount--;
+                member.log(res.body);
                 if (/^-ERR/.test(res.body)) {
                     application.Esl.off(`esl::event::CHANNEL_ANSWER::${member.sessionId}`, onChannelAnswer);
                     application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelDestroy);
@@ -151,6 +164,13 @@ module.exports = class Predictive extends Dialer {
                     }
                     member.end(error);
                     return;
+                } else if (/^-USAGE/.test(res.body)) {
+                    this._activeCallCount--;
+                    // TODO
+                    member.log(`minus line`);
+                    destoySession = true;
+                    member.end('DESTINATION_OUT_OF_ORDER');
+                    return
                 }
                 member.channelsCount++;
             });
@@ -164,10 +184,6 @@ module.exports = class Predictive extends Dialer {
         this._q = q;
         this._callRequestCount = 0;
         this.__dumpLastRecalc = 10;
-
-        setTimeout( function() {
-            this.calcLimit();
-        }.bind(this), 15000);
     }
 
     calcLimit (agent) {
@@ -193,12 +209,15 @@ module.exports = class Predictive extends Dialer {
                     if (this._predictAdjust > 1000)
                         this._predictAdjust = 1000;
                 } else  if (avgBad === 0) {
-                    this._predictAdjust += this._predictAdjust * 0.1;
+                    this._predictAdjust += this._predictAdjust * 0.055;
                 }
                 this.__dumpLastRecalc = this._gotCallCount + 10;
             }
 
-            let connectRate = this._allCallCount / this._gotCallCount;
+            let connectRate = this._allCallCount / this._gotCallCount;        if (this._limit > this._router._limit) {
+            log.warn(`skip dialer limit, max resources ${this._router._limit}`);
+            this._limit = this._router._limit;
+        }
             let overDial = Math.abs((aC / connectRate) - aC);
             console.log(`connectRate: ${connectRate} overDial: ${overDial}`);
             cc =  Math.ceil(aC + (overDial * this._predictAdjust) / 100 );
@@ -219,7 +238,7 @@ module.exports = class Predictive extends Dialer {
         //     }
         // }
 
-        console.log(`concurrency: ${this._q.concurrency}; cc: ${cc}; calls: ${this._activeCallCount}; adjust: ${this._predictAdjust}; all: ${this._allCallCount}; got: ${this._gotCallCount}; bad: ${this._badCallCount}`);
+        console.log(`concurrency: ${this._q.concurrency}; cc: ${cc}; aC: ${aC}; calls: ${this._activeCallCount}; adjust: ${this._predictAdjust}; all: ${this._allCallCount}; got: ${this._gotCallCount}; bad: ${this._badCallCount}`);
 
         if (this._queueCall.length > 0) {
             for (let i = 0; i < cc; i++) {
