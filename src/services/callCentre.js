@@ -143,11 +143,11 @@ var Service = {
 
             if (!domain) {
                 return cb(new CodeError(400, 'Domain is required.'));
-            };
+            }
 
             if (!option.agent) {
                 return cb(new CodeError(400, 'Agent is required.'))
-            };
+            }
             let status = option['status']
                     ? " '" + option['status'] + "'"
                     : " 'Available'"
@@ -595,7 +595,7 @@ var Service = {
     },
 
     _setAgentState: function (agentId, state, cb) {
-        application.Esl.bgapi(`callcenter_config agent set state ${agentId} ${state}`, function (res) {
+        application.Esl.api(`callcenter_config agent set state ${agentId} ${state}`, function (res) {
             if (getResponseOK(res)) {
                 return cb(null, res.body);
             } else {

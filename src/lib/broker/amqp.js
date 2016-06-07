@@ -291,18 +291,19 @@ class WebitelAmqp extends EventEmitter2 {
                         }, {noAck: true});
                     });
                     return cb(null, null);
-                },
+                }
                 
                 //init commands
-                function (_, cb) {
-                    log.debug('Try init switch commands queue response');
-                    channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
 
-                        channel.bindQueue(qok.queue, scope.Exchange.FS_COMMANDS, `engine.${scope._instanceId}.#`);
-
-                        channel.consume(qok.queue, scope[_onRequestFsApi].bind(scope), {noAck: true}, cb);
-                    });
-                }
+                // function (_, cb) {
+                //     log.debug('Try init switch commands queue response');
+                //     channel.assertQueue('', {autoDelete: true, durable: false, exclusive: true}, (err, qok) => {
+                //
+                //         channel.bindQueue(qok.queue, scope.Exchange.FS_COMMANDS, `engine.${scope._instanceId}.#`);
+                //
+                //         channel.consume(qok.queue, scope[_onRequestFsApi].bind(scope), {noAck: true}, cb);
+                //     });
+                // }
             ],
             (err) => {
                 if (err)

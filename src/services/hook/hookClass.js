@@ -111,7 +111,7 @@ class Message {
             request.qs = this.data;
         } else {
             request.json = this.toJson();
-        };
+        }
 
         return request;
     };
@@ -127,7 +127,7 @@ class Message {
     toString() {
         return JSON.stringify(this.toJson());
     }
-};
+}
 
 class Trigger {
     constructor (app) {
@@ -193,7 +193,7 @@ class Trigger {
                 })
             } else {
                 log.info("No hook.");
-            };
+            }
 
         })
     };

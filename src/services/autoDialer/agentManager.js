@@ -60,12 +60,13 @@ class AgentManager extends EventEmitter2 {
                     agent.unIdleTime = 0;
                     this.setAgentStatus(agent, AGENT_STATE.Waiting, (err) => {
                         if (err)
-                            log.error(err);
+                            return log.error(err);
+                        log.trace(`Ok set Waiting ${agent.id}`);
                     });
                 }
                 // TODO agent.availableTime + 3000
                 if (agent && agent.state === AGENT_STATE.Waiting && agent.status === AGENT_STATUS.Available && !agent.lock && agent.lockTime <= agent.availableTime + DIFF_CHANGE_MSEC + 500) {
-                    log.debug(`send free agent ${agent.id}`);
+                    // log.debug(`send free agent ${agent.id}`);
                     availableCount++;
                     this.emit('unReserveHookAgent', agent);
                 }
@@ -76,13 +77,39 @@ class AgentManager extends EventEmitter2 {
     }
 
     getFreeAgent (agents) {
+        if (agents) {
+            for (let key of agents) {
+                let a = this.getAgentById(key);
+                if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock && a.lockTime <= a.availableTime + DIFF_CHANGE_MSEC + 500) {
+                    return a;
+                }
+            }
+            this.agents;
+        }
+    }
+    getFreeAgents (agents) {
+        let res = [];
         if (agents)
             for (let key of agents) {
                 let a = this.getAgentById(key);
                 if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock &&  a.lockTime <= a.availableTime + DIFF_CHANGE_MSEC + 500) {
-                    return a;
+                    res.push(a);
                 }
             }
+
+        return res;
+    }
+
+    getFreeCount (agents) {
+        let c = 0;
+        if (agents)
+            for (let key of agents) {
+                let a = this.getAgentById(key);
+                if (a && a.state === AGENT_STATE.Waiting && a.status === AGENT_STATUS.Available && !a.lock &&  a.lockTime <= a.availableTime + DIFF_CHANGE_MSEC + 500) {
+                    c++;
+                }
+            }
+        return c;
     }
 
     taskUnReserveAgent (agent, timeSec) {
@@ -144,9 +171,10 @@ class AgentManager extends EventEmitter2 {
                 if (err)
                     return log.error(err);
                 dialer._agents = [];
-
+                let availableCount = 0;
                 async.eachSeries(agents,
                     (agent, cb) => {
+
                         let agentId = `${agent.id}@${agent.domain}`;
                         if (this.agents.existsKey(agentId)) {
                             dialer._agents.push(agentId);
@@ -157,15 +185,26 @@ class AgentManager extends EventEmitter2 {
                             if (err)
                                 return cb(err);
                             let agentParams = res && res[0];
+                            if (!agentParams) {
+                                log.warn(`Bad agent ${agentId}`);
+                                return cb();
+                            }
                             if (agentParams) {
                                 dialer._agents.push(agentId);
                                 this.agents.add(agentId, new Agent(agentId, agentParams, agent.skills));
+                            }
+                            if (agentParams.state === AGENT_STATE.Waiting &&
+                                (agentParams.status === AGENT_STATUS.Available || agentParams.status === AGENT_STATUS.AvailableOnDemand)) {
+                                availableCount++;
                             }
                             // TODO SKIP???
                             return cb();
                         });
                     },
-                    callback
+                    (err, res) => {
+                        this.availableCount = availableCount;
+                        callback(err, res);
+                    }
                 );
 
             }
