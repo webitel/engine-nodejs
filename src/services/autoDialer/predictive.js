@@ -79,7 +79,7 @@ module.exports = class Predictive extends Dialer {
         //     application.Esl.off('esl::event::CHANNEL_ANSWER::*', onChannelAnswer);
         //     application.Esl.off('esl::event::CHANNEL_BRIDGE::*', onChannelBridge);
         // });
-        application.Esl.subscribe(['CHANNEL_HANGUP_COMPLETE', 'CHANNEL_ANSWER']);
+        application.Esl.subscribe([ 'CHANNEL_HANGUP_COMPLETE', 'CHANNEL_ANSWER']);
 
         // application.Esl.on('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
         // application.Esl.on('esl::event::CHANNEL_CREATE::*', onChannelCreate);
@@ -214,10 +214,7 @@ module.exports = class Predictive extends Dialer {
                 this.__dumpLastRecalc = this._gotCallCount + 10;
             }
 
-            let connectRate = this._allCallCount / this._gotCallCount;        if (this._limit > this._router._limit) {
-            log.warn(`skip dialer limit, max resources ${this._router._limit}`);
-            this._limit = this._router._limit;
-        }
+            let connectRate = this._allCallCount / this._gotCallCount;
             let overDial = Math.abs((aC / connectRate) - aC);
             console.log(`connectRate: ${connectRate} overDial: ${overDial}`);
             cc =  Math.ceil(aC + (overDial * this._predictAdjust) / 100 );
