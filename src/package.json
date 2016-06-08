@@ -1,6 +1,6 @@
 {
   "name": "Webitel",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "Webitel WSS & HTTP server",
   "main": "index.js",
   "scripts": {
