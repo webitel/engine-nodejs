@@ -52,7 +52,7 @@ module.exports = class Member extends EventEmitter2 {
         this.variables = {};
 
         this._data = config;
-        this.name = config.name || "";
+        this.name = (config.name || "_undef_").replace(/'/g, '_');
 
 
         for (let key in config.variables) {

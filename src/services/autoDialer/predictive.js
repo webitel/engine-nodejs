@@ -50,49 +50,13 @@ module.exports = class Predictive extends Dialer {
             this._limit = this._router._limit;
         }
 
-        let getMembersFromEvent = (e) => {
-            return this.members.get(e.getHeader('variable_dlr_member_id'))
-        };
-
-        // let onChannelCreate = (e) => {
-        //
-        // };
-        // let onChannelDestroy = (e) => {
-        //
-        // };
-        //
-        // let onChannelPark = (e) => {
-        //     console.log('PARK');
-        // };
-        // let onChannelAnswer = (e) => {
-        //     console.log('ANSWER');
-        // };
-        // let onChannelBridge = (e) => {
-        //     console.log('BRIDGE');
-        // };
-        //
-        // this.once('end', () => {
-        //     log.debug('Off channel events');
-        //     application.Esl.off('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
-        //     application.Esl.off('esl::event::CHANNEL_CREATE::*', onChannelCreate);
-        //     application.Esl.off('esl::event::CHANNEL_PARK::*', onChannelPark);
-        //     application.Esl.off('esl::event::CHANNEL_ANSWER::*', onChannelAnswer);
-        //     application.Esl.off('esl::event::CHANNEL_BRIDGE::*', onChannelBridge);
-        // });
         application.Esl.subscribe([ 'CHANNEL_HANGUP_COMPLETE', 'CHANNEL_ANSWER']);
 
-        // application.Esl.on('esl::event::CHANNEL_DESTROY::*', onChannelDestroy);
-        // application.Esl.on('esl::event::CHANNEL_CREATE::*', onChannelCreate);
-        // application.Esl.on('esl::event::CHANNEL_PARK::*', onChannelPark);
-        // application.Esl.on('esl::event::CHANNEL_ANSWER::*', onChannelAnswer);
-        // application.Esl.on('esl::event::CHANNEL_BRIDGE::*', onChannelBridge);
-
-
         //
-        // for (let i = 99950; i <= 99999; i++) {
-        //     application.Esl.bgapi(`callcenter_config agent set status ${i}@10.10.10.144 Available`);
-        //     application.Esl.bgapi(`callcenter_config agent set state ${i}@10.10.10.144 Waiting`);
-        // }
+        for (let i = 99950; i <= 99999; i++) {
+            application.Esl.bgapi(`callcenter_config agent set status ${i}@10.10.10.144 Available`);
+            application.Esl.bgapi(`callcenter_config agent set state ${i}@10.10.10.144 Waiting`);
+        }
 
         let dial = (member, cb) => {
             let ds = member._ds;
@@ -126,15 +90,21 @@ module.exports = class Predictive extends Dialer {
 
             };
 
-            let destoySession = false;
+            let _destroySession = false;
+
+            let destroySession = () => {
+                if (!_destroySession) {
+                    _destroySession = true;
+                    member.log(`minus line`);
+                    member.channelsCount--;
+                    this._activeCallCount--;
+                    application.Esl.off(`esl::event::CHANNEL_ANSWER::${member.sessionId}`, onChannelAnswer);
+                    application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelDestroy);
+                }
+            };
 
             let onChannelDestroy = (e) => {
-                if (!destoySession) {
-                    this._activeCallCount--;
-                    member.log(`minus line`);
-                    destoySession = true;
-                    member.channelsCount--;
-                }
+                destroySession();
                 if (e.getHeader('variable_hangup_cause') != 'NORMAL_CLEARING') {
                     this._gotCallCount--;
                 }
@@ -156,35 +126,19 @@ module.exports = class Predictive extends Dialer {
                 this._callRequestCount--;
                 member.log(res.body);
                 if (/^-ERR/.test(res.body)) {
-                    application.Esl.off(`esl::event::CHANNEL_ANSWER::${member.sessionId}`, onChannelAnswer);
-                    application.Esl.off(`esl::event::CHANNEL_HANGUP_COMPLETE::${member.sessionId}`, onChannelDestroy);
                     let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
-                    if (!destoySession) {
-                        member.log(`minus line`);
-                        this._activeCallCount--;
-                        member.channelsCount--;
-                        destoySession = true;
-                    }
+                    destroySession();
                     member.end(error);
-                    return;
                 } else if (/^-USAGE/.test(res.body)) {
                     this._activeCallCount--;
-                    // TODO
-                    member.log(`minus line`);
-                    destoySession = true;
-                    member.channelsCount--;
+                    destroySession();
                     member.end('DESTINATION_OUT_OF_ORDER');
-                    return
                 }
             });
         };
 
         this.__dial = dial;
 
-        let q = async.queue(dial, this._agents.length);
-
-
-        this._q = q;
         this._callRequestCount = 0;
         this.__dumpLastRecalc = 10;
     }
@@ -196,10 +150,17 @@ module.exports = class Predictive extends Dialer {
             return;
         }
 
-        if (this._callRequestCount != 0) return;
+        let aC = 0;
         let cc = 0;
-        this._skipAgents = this._am.getFreeAgents(this._agents);
-        let aC = this._skipAgents.length; //this._skipAgents.length;
+        if (agent && this._gotCallCount > 10) {
+            aC = 1;
+            this._skipAgents.push(agent);
+        } else {
+            if (this._callRequestCount != 0) return;
+            this._skipAgents = this._am.getFreeAgents(this._agents);
+            aC = this._skipAgents.length;
+        }
+
         if (aC == 0)
                 return;
 
@@ -207,12 +168,12 @@ module.exports = class Predictive extends Dialer {
 
             if (this.__dumpLastRecalc < this._gotCallCount) {
                 let avgBad = (this._badCallCount * 100) / this._allCallCount;
-                if (avgBad > 3) {
+                if (avgBad > 2) {
                     this._predictAdjust -= this._predictAdjust * (avgBad / 100);
                     if (this._predictAdjust <= 0)
                         this._predictAdjust = 1;
 
-                } else if (avgBad > 0 && avgBad < 3 && this._predictAdjust < 1000) {
+                } else if (avgBad > 0 && avgBad < 2 && this._predictAdjust < 1000) {
                     this._predictAdjust += this._predictAdjust * ((100 - avgBad) / 100);
                     if (this._predictAdjust > 1000)
                         this._predictAdjust = 1000;
@@ -226,24 +187,11 @@ module.exports = class Predictive extends Dialer {
             let overDial = Math.abs((aC / connectRate) - aC);
             console.log(`connectRate: ${connectRate} overDial: ${overDial}`);
             cc =  Math.ceil(aC + (overDial * this._predictAdjust) / 100 );
-            this._q.concurrency = this._activeCallCount + cc;
         } else {
             cc = aC;
         }
 
-
-
-        // move config; recalc _predictAdjust
-        // if (!(this._allCallCount % 10)) {
-        //     let avgBad = this._badCallCount * 100 / this._allCallCount;
-        //     if (avgBad > 3.99) {
-        //         this._predictAdjust -= this._predictAdjust * ((avgBad - 3.99) / 100);
-        //     } else if (avgBad >= 0 && avgBad < 3) {
-        //         this._predictAdjust += this._predictAdjust * 0.1;
-        //     }
-        // }
-
-        console.log(`concurrency: ${this._q.concurrency}; cc: ${cc}; aC: ${aC}; calls: ${this._activeCallCount}; adjust: ${this._predictAdjust}; all: ${this._allCallCount}; got: ${this._gotCallCount}; bad: ${this._badCallCount}`);
+        console.log(`concurrency: ${this._activeCallCount + cc}; cc: ${cc}; aC: ${aC}; calls: ${this._activeCallCount}; adjust: ${this._predictAdjust}; all: ${this._allCallCount}; got: ${this._gotCallCount}; bad: ${this._badCallCount}`);
 
         if (this._queueCall.length > 0) {
             for (let i = 0; i < cc; i++) {
@@ -252,8 +200,9 @@ module.exports = class Predictive extends Dialer {
                     break;
                 }
                 this.__dial(m, this.calcLimit.bind(this));
-                // this._q.push(m, this.calcLimit.bind(this));
             }
+        } else {
+            this._skipAgents.length = 0;
         }
     }
 
@@ -272,7 +221,12 @@ module.exports = class Predictive extends Dialer {
                 member.once('end', () => {
                     this._router.freeGateway(gw);
                     if (member._agent) {
+                        let id = this._skipAgents.indexOf(member._agent);
+                        if (~id) {
+                            this._skipAgents.slice(id, 1);
+                        }
                         this._am.taskUnReserveAgent(member._agent, 10);
+
                     }
                 });
 
@@ -292,41 +246,9 @@ module.exports = class Predictive extends Dialer {
     setAgent (agent) {
         if (~this._skipAgents.indexOf(agent) || !this.isReady())
                 return false;
-        // console.log(`free agent ${agent.id}`);
-        this.calcLimit(agent);
-        // this._limit++;
-        // this.huntingMember();
+
+        this.calcLimit();
         return true;
-
-        // let ds = this._gw.dialAgent(agent);
-        // this._am.reserveAgent(agent, (err) => {
-        //     if (err) {
-        //         return log.error(err);
-        //     }
-        //     application.Esl.bgapi(ds, (res) => {
-        //         if (/^-ERR/.test(res.body)) {
-        //             let error =  res.body.replace(/-ERR\s(.*)\n/, '$1');
-        //             log.error(error);
-        //             this._am.taskUnReserveAgent(agent, agent.rejectDelayTime);
-        //         }
-        //     });
-        // });
-        // return true;
     }
 
-    setLimit () {
-        let p = 10; // the hit rate
-        let m = 10; // parameter of service distribution
-        let qD = 10; // the dial frequency
-        let q = this.members.length(); // inbound call flow
-
-        let aMax = 2; // The maximum abandon rate
-        let agentsCount = this._am.availableCount; // the number of free agents
-
-
-    }
-
-    findAvailAgents (cb) {
-
-    }
 };
