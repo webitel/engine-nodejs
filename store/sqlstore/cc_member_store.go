@@ -548,3 +548,21 @@ from cc_member m
 
 	return att, nil
 }
+
+func (s SqlMemberStore) ChangeAttemptAgent(domainId int64, attemptId int64, agentId int) *model.AppError {
+	_, err := s.GetMaster().Exec(`update cc_member_attempt_history
+set agent_id = :AgentId,
+    owner_agent_id = case when owner_agent_id isnull then agent_id else owner_agent_id end
+where id = :AttemptId and domain_id = :DomainId`, map[string]interface{}{
+		"DomainId": domainId,
+		"Id":       attemptId,
+		"AgentId":  agentId,
+	})
+
+	if err != nil {
+		return model.NewAppError("SqlMemberStore.ChangeAttemptAgent", "store.sql_member.attempt_agent.app_error", nil,
+			err.Error(), extractCodeFromErr(err))
+	}
+
+	return nil
+}

@@ -154,3 +154,7 @@ func (app *App) ReportingAttempt(attemptId int64, status, description string, ne
 
 	return nil
 }
+
+func (app *App) ChangeAttemptAgent(domainId int64, attemptId int64, agentId int) *model.AppError {
+	return app.Store.Member().ChangeAttemptAgent(domainId, attemptId, agentId)
+}

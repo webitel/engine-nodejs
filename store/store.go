@@ -267,6 +267,8 @@ type MemberStore interface {
 	SearchAttempts(domainId int64, search *model.SearchAttempts) ([]*model.Attempt, *model.AppError)
 	SearchAttemptsHistory(domainId int64, search *model.SearchAttempts) ([]*model.AttemptHistory, *model.AppError)
 	ListOfflineQueueForAgent(domainId int64, search *model.SearchOfflineQueueMembers) ([]*model.OfflineMember, *model.AppError)
+
+	ChangeAttemptAgent(domainId int64, attemptId int64, agentId int) *model.AppError
 }
 
 type BucketSore interface {

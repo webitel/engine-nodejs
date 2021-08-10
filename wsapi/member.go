@@ -11,6 +11,7 @@ func (api *API) InitMember() {
 	api.Router.Handle("cc_member_page", api.ApiWebSocketHandler(api.getMember))
 	api.Router.Handle("cc_fetch_offline_members", api.ApiWebSocketHandler(api.offlineMembers))
 	api.Router.Handle("cc_reporting", api.ApiWebSocketHandler(api.reporting))
+	api.Router.Handle("cc_change_attempt_agent", api.ApiWebSocketHandler(api.changeAttemptAgent))
 }
 
 func (api *API) reporting(conn *app.WebConn, req *model.WebSocketRequest) (map[string]interface{}, *model.AppError) {
@@ -156,4 +157,27 @@ func (api *API) getMember(conn *app.WebConn, req *model.WebSocketRequest) (map[s
 	out, err = api.App.GetMember(session.Domain(0), int64(queueId), int64(memberId))
 
 	return model.InterfaceToMapString(out), nil
+}
+
+func (api *API) changeAttemptAgent(conn *app.WebConn, req *model.WebSocketRequest) (map[string]interface{}, *model.AppError) {
+	var agentId float64
+	var attemptId float64
+	var ok bool
+	var err *model.AppError
+
+	session := conn.GetSession()
+
+	if attemptId, ok = req.Data["attempt_id"].(float64); !ok {
+		return nil, NewInvalidWebSocketParamError(req.Action, "attempt_id")
+	}
+	if agentId, ok = req.Data["agent_id"].(float64); !ok {
+		return nil, NewInvalidWebSocketParamError(req.Action, "agent_id")
+	}
+
+	if err = api.App.ChangeAttemptAgent(session.DomainId, int64(attemptId), int(agentId)); err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]interface{})
+	return res, nil
 }
