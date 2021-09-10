@@ -554,9 +554,9 @@ func (s SqlMemberStore) ChangeAttemptAgent(domainId int64, attemptId int64, agen
 set agent_id = :AgentId,
     owner_agent_id = case when owner_agent_id isnull then agent_id else owner_agent_id end
 where id = :AttemptId and domain_id = :DomainId`, map[string]interface{}{
-		"DomainId": domainId,
-		"Id":       attemptId,
-		"AgentId":  agentId,
+		"DomainId":  domainId,
+		"AttemptId": attemptId,
+		"AgentId":   agentId,
 	})
 
 	if err != nil {
