@@ -609,7 +609,7 @@ class AutoDialer extends EventEmitter2 {
             dialer.setState(DIALER_STATES.ProcessStop);
         }
 
-        console.log(`Stop dialer: ${id}, active members: ${dialer ? dialer.members.getKeys() : 0}`);
+        log.trace(`Stop dialer: ${id}, active members: ${dialer ? dialer.members.getKeys() : 0}`);
 
         this.dbDialer._updateDialer(
             id,
@@ -644,23 +644,23 @@ class AutoDialer extends EventEmitter2 {
             if (ad.state === DIALER_STATES.Work)
                 ad.emit('wakeUp');
 
-            console.log(`-----------DUMP DIALER-----------`);
-            console.log(`name: ${ad.nameDialer}`);
-            console.log(`state: ${ad.state}`);
-            console.log(`active: ${ad._active}`);
-            console.log(`cause: ${ad.cause}`);
-            console.log(`countMembers: ${ad.countMembers}`);
+            log.trace(`-----------DUMP DIALER-----------`);
+            log.trace(`name: ${ad.nameDialer}`);
+            log.trace(`state: ${ad.state}`);
+            log.trace(`active: ${ad._active}`);
+            log.trace(`cause: ${ad.cause}`);
+            log.trace(`countMembers: ${ad.countMembers}`);
 
-            console.log(`members: ${ad.members.length()}`);
+            log.trace(`members: ${ad.members.length()}`);
             if (ad.members.length() > 0) {
                 const keys = ad.members.getKeys();
                 for (let key of keys) {
-                    console.dir(ad.members.get(key))
+                    log.trace(ad.members.get(key))
                 }
             }
 
-            console.log(`stats:`);
-            console.dir(ad._stats);
+            log.trace(`stats:`);
+            log.trace(ad._stats);
 
             return cb && cb(null, {active: true});
         }
